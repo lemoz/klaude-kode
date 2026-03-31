@@ -1,22 +1,38 @@
+import { createInterface } from "node:readline";
 import process from "node:process";
 
 import {
   defaultShellConfig,
+  makeCloseSessionCommand,
+  makeUserInputCommand,
+  startEngineSession,
   type SessionEvent,
   type SessionStateSnapshot,
-  runEngineSession,
 } from "./engineClient.js";
 
 async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
-  const events = await runEngineSession(config);
+  const renderer = createRenderer(config.rawEvents);
+  const session = await startEngineSession(config, (event) => {
+    renderer.handleEvent(event);
+  });
 
-  if (config.rawEvents) {
-    console.log(JSON.stringify(events, null, 2));
-    return;
+  try {
+    if (config.prompt !== "") {
+      await session.sendCommand(makeUserInputCommand(config.prompt));
+      await session.sendCommand(makeCloseSessionCommand("shell_prompt_complete"));
+      await session.closeInput();
+      await session.done;
+      return;
+    }
+
+    console.log("Klaude Kode shell");
+    console.log("Type /exit to close the session.");
+    await runInteractiveLoop(session, renderer.showPrompt);
+    await session.done;
+  } finally {
+    await session.closeInput().catch(() => undefined);
   }
-
-  console.log(renderTranscript(events));
 }
 
 function parseArgs(args: string[]) {
@@ -94,107 +110,138 @@ function parseArgs(args: string[]) {
     throw new Error(`unsupported argument: ${arg}`);
   }
 
-  if (config.resumeSessionId !== "" && config.prompt !== "bootstrap hello from cc-shell") {
+  if (config.resumeSessionId !== "" && config.prompt !== "") {
     throw new Error("--prompt cannot be used with --resume-session");
   }
 
   return config;
 }
 
-function renderTranscript(events: SessionEvent[]): string {
-  const lines = ["Klaude Kode shell", `events: ${events.length}`];
-  const initialState = firstState(events);
-  if (initialState) {
-    lines.push(`session: ${events[0]?.session_id ?? "unknown"}`);
-    lines.push(`mode: ${initialState.mode}`);
-    lines.push(`model: ${initialState.model}`);
-  }
+async function runInteractiveLoop(
+  session: Awaited<ReturnType<typeof startEngineSession>>,
+  showPrompt: () => void,
+): Promise<void> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: process.stdin.isTTY && process.stdout.isTTY,
+  });
 
-  for (const event of events) {
-    switch (event.kind) {
-      case "user_message_accepted":
-        if (event.payload.message?.content) {
-          lines.push(`user: ${event.payload.message.content}`);
-        }
+  try {
+    showPrompt();
+    let closedByUser = false;
+
+    for await (const rawLine of rl) {
+      const line = rawLine.trim();
+      if (line === "") {
+        showPrompt();
+        continue;
+      }
+      if (line === "/exit") {
+        await session.sendCommand(makeCloseSessionCommand("shell_exit"));
+        await session.closeInput();
+        closedByUser = true;
         break;
-      case "assistant_message":
-        if (event.payload.message?.content) {
-          lines.push(`assistant: ${event.payload.message.content}`);
-        }
-        break;
-      case "tool_call_requested":
-        if (event.payload.tool) {
-          lines.push(`tool:${event.payload.tool.name} requested`);
-        }
-        break;
-      case "tool_call_progress":
-        if (event.payload.tool?.progress_message) {
-          lines.push(`tool:${event.payload.tool.name} ${event.payload.tool.progress_message}`);
-        }
-        break;
-      case "tool_call_completed":
-        if (event.payload.tool) {
-          const output = event.payload.tool.output ? ` output=${event.payload.tool.output}` : "";
-          lines.push(
-            `tool:${event.payload.tool.name} ${event.payload.tool.result_summary}${output}`,
-          );
-        }
-        break;
-      case "permission_requested":
-        if (event.payload.permission?.prompt) {
-          lines.push(`permission: ${event.payload.permission.prompt}`);
-        }
-        break;
-      case "permission_resolved":
-        if (event.payload.permission?.resolution) {
-          lines.push(`permission: ${event.payload.permission.resolution}`);
-        }
-        break;
-      case "warning":
-        if (event.payload.warning) {
-          lines.push(`warning: ${event.payload.warning}`);
-        }
-        break;
-      case "failure":
-        if (event.payload.failure) {
-          lines.push(
-            `failure:${event.payload.failure.category} ${event.payload.failure.message}`,
-          );
-        }
-        break;
-      case "session_closed":
-        lines.push(`status: closed (${event.payload.reason || "no_reason"})`);
-        break;
-      default:
-        break;
+      }
+      await session.sendCommand(makeUserInputCommand(line));
+      showPrompt();
     }
-  }
 
-  const finalState = lastState(events);
-  if (finalState) {
-    lines.push(`terminal_outcome: ${finalState.terminal_outcome || "none"}`);
+    if (!closedByUser) {
+      await session.sendCommand(makeCloseSessionCommand("shell_eof"));
+      await session.closeInput();
+    }
+  } finally {
+    rl.close();
   }
-
-  return lines.join("\n");
 }
 
-function firstState(events: SessionEvent[]): SessionStateSnapshot | null {
-  for (const event of events) {
-    if (event.payload.state) {
-      return event.payload.state;
-    }
-  }
-  return null;
+function createRenderer(rawEvents: boolean) {
+  let headerPrinted = false;
+
+  const print = (line: string) => {
+    console.log(line);
+  };
+
+  return {
+    handleEvent(event: SessionEvent): void {
+      if (rawEvents) {
+        print(JSON.stringify(event));
+        return;
+      }
+
+      const state = event.payload.state;
+      if (!headerPrinted && state) {
+        print(`session: ${event.session_id}`);
+        print(`mode: ${state.mode}`);
+        print(`model: ${state.model}`);
+        headerPrinted = true;
+      }
+
+      const rendered = renderEvent(event);
+      if (rendered !== "") {
+        print(rendered);
+      }
+    },
+    showPrompt(): void {
+      if (!rawEvents && process.stdout.isTTY) {
+        process.stdout.write("klaude> ");
+      }
+    },
+  };
 }
 
-function lastState(events: SessionEvent[]): SessionStateSnapshot | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const state = events[index]?.payload.state;
-    if (state) {
-      return state;
-    }
+function renderEvent(event: SessionEvent): string {
+  switch (event.kind) {
+    case "user_message_accepted":
+      return event.payload.message?.content
+        ? `user: ${event.payload.message.content}`
+        : "";
+    case "assistant_message":
+      return event.payload.message?.content
+        ? `assistant: ${event.payload.message.content}`
+        : "";
+    case "tool_call_requested":
+      return event.payload.tool ? `tool:${event.payload.tool.name} requested` : "";
+    case "tool_call_progress":
+      return event.payload.tool?.progress_message
+        ? `tool:${event.payload.tool.name} ${event.payload.tool.progress_message}`
+        : "";
+    case "tool_call_completed":
+      if (!event.payload.tool) {
+        return "";
+      }
+      return event.payload.tool.output
+        ? `tool:${event.payload.tool.name} ${event.payload.tool.result_summary} output=${event.payload.tool.output}`
+        : `tool:${event.payload.tool.name} ${event.payload.tool.result_summary}`;
+    case "permission_requested":
+      return event.payload.permission?.prompt
+        ? `permission: ${event.payload.permission.prompt}`
+        : "";
+    case "permission_resolved":
+      return event.payload.permission?.resolution
+        ? `permission: ${event.payload.permission.resolution}`
+        : "";
+    case "warning":
+      return event.payload.warning ? `warning: ${event.payload.warning}` : "";
+    case "failure":
+      return event.payload.failure
+        ? `failure:${event.payload.failure.category} ${event.payload.failure.message}`
+        : "";
+    case "session_closed":
+      return `status: closed (${event.payload.reason || "no_reason"})`;
+    case "session_state":
+      return renderTerminalOutcome(event.payload.state);
+    default:
+      return "";
   }
-  return null;
+}
+
+function renderTerminalOutcome(state: SessionStateSnapshot | null): string {
+  if (!state || state.status !== "closed") {
+    return "";
+  }
+  return `terminal_outcome: ${state.terminal_outcome || "none"}`;
 }
 
 function printHelp(): void {
@@ -202,14 +249,14 @@ function printHelp(): void {
     "Usage: npm run dev -- [options]",
     "",
     "Options:",
-    "  --prompt <text>            Prompt to send to cc-engine",
+    "  --prompt <text>            Send one prompt, stream results, and exit",
     "  --session-id <id>          Session identifier",
-    "  --resume-session <id>      Load a persisted session instead of sending a prompt",
+    "  --resume-session <id>      Resume a persisted session",
     "  --cwd <path>               Session working directory",
     "  --profile-id <id>          Active auth profile id",
     "  --model <id>               Active model id",
     "  --state-root <path>        Engine state root",
-    "  --raw-events               Print parsed event JSON instead of a transcript",
+    "  --raw-events               Print canonical event JSON lines",
   ];
   console.log(help.join("\n"));
 }

@@ -85,26 +85,42 @@ export interface SessionEvent {
   payload: SessionEventPayload;
 }
 
+export interface SessionCommandPayload {
+  text?: string;
+  reason?: string;
+  source?: string;
+}
+
+export interface SessionCommand {
+  kind: string;
+  payload: SessionCommandPayload;
+}
+
+export interface EngineSession {
+  sendCommand(command: SessionCommand): Promise<void>;
+  closeInput(): Promise<void>;
+  done: Promise<void>;
+}
+
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(sourceDir, "../..");
 
-export async function runEngineSession(
+export async function startEngineSession(
   config: ShellConfig,
-): Promise<SessionEvent[]> {
+  onEvent: (event: SessionEvent) => void,
+): Promise<EngineSession> {
   const args = buildEngineArgs(config);
   const child = spawn("go", args, {
     cwd: repoRoot,
     env: process.env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
-  if (!child.stdout || !child.stderr) {
+  if (!child.stdin || !child.stdout || !child.stderr) {
     throw new Error("cc-engine stdio pipes are unavailable");
   }
 
-  const events: SessionEvent[] = [];
   const lines = createInterface({ input: child.stdout });
-
   const readEvents = (async () => {
     for await (const line of lines) {
       const trimmed = line.trim();
@@ -112,7 +128,7 @@ export async function runEngineSession(
         continue;
       }
       const event = JSON.parse(trimmed) as SessionEvent;
-      events.push(event);
+      onEvent(event);
     }
   })();
 
@@ -121,41 +137,102 @@ export async function runEngineSession(
     stderr += chunk.toString();
   });
 
-  const exitCode = await new Promise<number>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
-  });
+  const done = (async () => {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code) => resolve(code ?? 1));
+    });
 
-  await readEvents;
+    await readEvents;
 
-  if (exitCode !== 0) {
-    const details = stderr.trim();
-    throw new Error(
-      details === ""
-        ? `cc-engine exited with code ${exitCode}`
-        : `cc-engine exited with code ${exitCode}: ${details}`,
-    );
-  }
+    if (exitCode !== 0) {
+      const details = stderr.trim();
+      throw new Error(
+        details === ""
+          ? `cc-engine exited with code ${exitCode}`
+          : `cc-engine exited with code ${exitCode}: ${details}`,
+      );
+    }
+  })();
 
-  return events;
+  return {
+    async sendCommand(command: SessionCommand): Promise<void> {
+      if (child.stdin.destroyed) {
+        throw new Error("cc-engine command stream is closed");
+      }
+      await writeLine(child.stdin, JSON.stringify(command));
+    },
+    async closeInput(): Promise<void> {
+      if (child.stdin.destroyed || child.stdin.writableEnded) {
+        return;
+      }
+      await new Promise<void>((resolve, reject) => {
+        child.stdin.end((error?: Error | null) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
+    done,
+  };
+}
+
+export function makeUserInputCommand(text: string): SessionCommand {
+  return {
+    kind: "user_input",
+    payload: {
+      text,
+      source: "interactive",
+    },
+  };
+}
+
+export function makeCloseSessionCommand(reason: string): SessionCommand {
+  return {
+    kind: "close_session",
+    payload: {
+      reason,
+    },
+  };
 }
 
 function buildEngineArgs(config: ShellConfig): string[] {
-  const args = ["run", "./cmd/cc-engine", "-format=events"];
+  const args = [
+    "run",
+    "./cmd/cc-engine",
+    "-transport=stdio",
+    "-format=events",
+    `-cwd=${config.cwd}`,
+    `-profile-id=${config.profileId}`,
+    `-model=${config.model}`,
+    `-state-root=${config.stateRoot}`,
+  ];
 
   if (config.resumeSessionId !== "") {
     args.push(`-resume-session=${config.resumeSessionId}`);
   } else {
-    args.push(`-prompt=${config.prompt}`);
     args.push(`-session-id=${config.sessionId}`);
   }
 
-  args.push(`-cwd=${config.cwd}`);
-  args.push(`-profile-id=${config.profileId}`);
-  args.push(`-model=${config.model}`);
-  args.push(`-state-root=${config.stateRoot}`);
-
   return args;
+}
+
+function writeLine(
+  writable: NodeJS.WritableStream,
+  line: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    writable.write(`${line}\n`, (error?: Error | null) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 export function defaultStateRoot(): string {
@@ -168,7 +245,7 @@ export function defaultStateRoot(): string {
 
 export function defaultShellConfig(): ShellConfig {
   return {
-    prompt: "bootstrap hello from cc-shell",
+    prompt: "",
     sessionId: "shell-bootstrap",
     resumeSessionId: "",
     cwd: repoRoot,
