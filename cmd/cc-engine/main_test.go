@@ -322,6 +322,9 @@ func TestRunReplayEvalJSON(t *testing.T) {
 	if got.ReplayPath != replayPath {
 		t.Fatalf("expected replay path %s, got %s", replayPath, got.ReplayPath)
 	}
+	if _, err := os.Stat(harness.EvalRunPath(harness.DefaultArtifactRoot(candidateRoot), got.ID)); err != nil {
+		t.Fatalf("expected persisted eval run artifact: %v", err)
+	}
 }
 
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {

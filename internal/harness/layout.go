@@ -1,12 +1,14 @@
 package harness
 
 const (
-	DirCandidates  = "candidates"
-	DirRuns        = "runs"
-	DirReplayPacks = "replay-packs"
-	DirBenchmarks  = "benchmarks"
-	DirIndexes     = "indexes"
-	DirReports     = "reports"
+	DefaultArtifactDirName = ".klaude-harness"
+	DirCandidates          = "candidates"
+	DirRuns                = "runs"
+	DirReplayPacks         = "replay-packs"
+	DirBenchmarks          = "benchmarks"
+	DirIndexes             = "indexes"
+	DirReports             = "reports"
+	RunMetadataFile        = "run.json"
 )
 
 var artifactDirs = []string{

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
+	"github.com/cdossman/klaude-kode/internal/harness"
 )
 
 func TestRunJSONFormat(t *testing.T) {
@@ -299,6 +300,13 @@ func TestRunReplayEvalText(t *testing.T) {
 	}
 	if !strings.Contains(output, "score: 1.00") {
 		t.Fatalf("expected score in replay eval output, got %q", output)
+	}
+
+	artifactRoot := filepath.Join(candidateRoot, harness.DefaultArtifactDirName)
+	runIDLine := strings.Split(strings.TrimSpace(output), "\n")[1]
+	runID := strings.TrimPrefix(runIDLine, "run: ")
+	if _, err := os.Stat(harness.EvalRunPath(artifactRoot, runID)); err != nil {
+		t.Fatalf("expected persisted eval run artifact: %v", err)
 	}
 }
 

@@ -454,6 +454,9 @@ func renderReplayEval(cfg config, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if _, err := harness.PersistEvalRun(harness.DefaultArtifactRoot(run.Candidate.Root), run); err != nil {
+		return err
+	}
 
 	switch cfg.Format {
 	case outputFormatJSON:
