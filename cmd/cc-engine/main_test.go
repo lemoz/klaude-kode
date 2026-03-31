@@ -244,3 +244,53 @@ func TestRunStdioTransportStreamsInteractiveSession(t *testing.T) {
 		t.Fatalf("expected stdio close reason, got %q", got[len(got)-1].Payload.Reason)
 	}
 }
+
+func TestRunStdioTransportSupportsPermissionApproval(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	stdin := strings.NewReader(strings.Join([]string{
+		`{"kind":"user_input","payload":{"text":"tool:pwd","metadata":{"permission_mode":"ask"}}}`,
+		`{"kind":"approve_permission","payload":{"request_id":"perm_tool_turn_1_1"}}`,
+		`{"kind":"close_session","payload":{"reason":"stdio_permission_complete"}}`,
+		"",
+	}, "\n"))
+
+	err := runWithInput([]string{
+		"-transport=stdio",
+		"-format=events",
+		"-session-id=stdio-permission",
+		"-state-root=" + root,
+	}, stdin, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runWithInput returned error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 14 {
+		t.Fatalf("expected 14 stdio events with permission approval, got %d", len(lines))
+	}
+
+	var got []contracts.SessionEvent
+	for _, line := range lines {
+		var event contracts.SessionEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("failed to parse stdio event line %q: %v", line, err)
+		}
+		got = append(got, event)
+	}
+
+	if got[5].Kind != contracts.EventKindPermissionRequested {
+		t.Fatalf("expected permission_requested, got %s", got[5].Kind)
+	}
+	if got[6].Kind != contracts.EventKindPermissionResolved {
+		t.Fatalf("expected permission_resolved, got %s", got[6].Kind)
+	}
+	if got[6].Payload.Permission == nil || got[6].Payload.Permission.Actor != "user" {
+		t.Fatalf("expected user approval actor, got %#v", got[6].Payload.Permission)
+	}
+	if got[9].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message after approval, got %s", got[9].Kind)
+	}
+}

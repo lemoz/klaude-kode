@@ -138,3 +138,66 @@ func TestFileBackedEngineResumeAcrossInstances(t *testing.T) {
 		t.Fatalf("expected resumed stream to replay 9 events, got %d", count)
 	}
 }
+
+func TestFileBackedEngineResumesPendingPermissionRequests(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	runtimeA, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+
+	handle, err := runtimeA.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "resume-pending-permission",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: "profile-a",
+		Model:     "model-a",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtimeA.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "tool:pwd",
+			Source: contracts.MessageSourceInteractive,
+			Metadata: map[string]string{
+				"permission_mode": "ask",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	runtimeB, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+
+	if _, err := runtimeB.ResumeSession(ctx, contracts.ResumeSessionRequest{SessionID: handle.SessionID}); err != nil {
+		t.Fatalf("ResumeSession returned error: %v", err)
+	}
+
+	if err := runtimeB.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindApprovePermission,
+		Payload: contracts.SessionCommandPayload{
+			RequestID: "perm_tool_turn_1_1",
+		},
+	}); err != nil {
+		t.Fatalf("ApprovePermission returned error after resume: %v", err)
+	}
+
+	events, err := runtimeB.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) != 12 {
+		t.Fatalf("expected 12 events after resumed permission approval, got %d", len(events))
+	}
+	if events[6].Kind != contracts.EventKindPermissionResolved {
+		t.Fatalf("expected permission_resolved after resume, got %s", events[6].Kind)
+	}
+}

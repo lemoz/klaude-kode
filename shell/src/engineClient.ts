@@ -88,7 +88,9 @@ export interface SessionEvent {
 export interface SessionCommandPayload {
   text?: string;
   reason?: string;
+  request_id?: string;
   source?: string;
+  metadata?: Record<string, string>;
 }
 
 export interface SessionCommand {
@@ -180,12 +182,16 @@ export async function startEngineSession(
   };
 }
 
-export function makeUserInputCommand(text: string): SessionCommand {
+export function makeUserInputCommand(
+  text: string,
+  options?: { askForPermission?: boolean },
+): SessionCommand {
   return {
     kind: "user_input",
     payload: {
       text,
       source: "interactive",
+      metadata: options?.askForPermission ? { permission_mode: "ask" } : undefined,
     },
   };
 }
@@ -195,6 +201,24 @@ export function makeCloseSessionCommand(reason: string): SessionCommand {
     kind: "close_session",
     payload: {
       reason,
+    },
+  };
+}
+
+export function makeApprovePermissionCommand(requestID: string): SessionCommand {
+  return {
+    kind: "approve_permission",
+    payload: {
+      request_id: requestID,
+    },
+  };
+}
+
+export function makeDenyPermissionCommand(requestID: string): SessionCommand {
+  return {
+    kind: "deny_permission",
+    payload: {
+      request_id: requestID,
     },
   };
 }

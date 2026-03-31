@@ -2,10 +2,13 @@ import { createInterface } from "node:readline";
 import process from "node:process";
 
 import {
+  makeApprovePermissionCommand,
   defaultShellConfig,
   makeCloseSessionCommand,
+  makeDenyPermissionCommand,
   makeUserInputCommand,
   startEngineSession,
+  type PermissionEventPayload,
   type SessionEvent,
   type SessionStateSnapshot,
 } from "./engineClient.js";
@@ -28,7 +31,7 @@ async function main(): Promise<void> {
 
     console.log("Klaude Kode shell");
     console.log("Type /exit to close the session.");
-    await runInteractiveLoop(session, renderer.showPrompt);
+    await runInteractiveLoop(session, renderer);
     await session.done;
   } finally {
     await session.closeInput().catch(() => undefined);
@@ -119,7 +122,7 @@ function parseArgs(args: string[]) {
 
 async function runInteractiveLoop(
   session: Awaited<ReturnType<typeof startEngineSession>>,
-  showPrompt: () => void,
+  ui: ReturnType<typeof createRenderer>,
 ): Promise<void> {
   const rl = createInterface({
     input: process.stdin,
@@ -128,13 +131,13 @@ async function runInteractiveLoop(
   });
 
   try {
-    showPrompt();
+    ui.showPrompt(ui.currentPrompt());
     let closedByUser = false;
 
     for await (const rawLine of rl) {
       const line = rawLine.trim();
       if (line === "") {
-        showPrompt();
+        ui.showPrompt(ui.currentPrompt());
         continue;
       }
       if (line === "/exit") {
@@ -143,8 +146,26 @@ async function runInteractiveLoop(
         closedByUser = true;
         break;
       }
-      await session.sendCommand(makeUserInputCommand(line));
-      showPrompt();
+      const pendingPermission = ui.takePendingPermission();
+      if (pendingPermission) {
+        const decisionVersion = ui.decisionVersion();
+        if (looksApproved(line)) {
+          await session.sendCommand(
+            makeApprovePermissionCommand(pendingPermission.request_id),
+          );
+        } else {
+          await session.sendCommand(
+            makeDenyPermissionCommand(pendingPermission.request_id),
+          );
+        }
+        await ui.waitForDecision(decisionVersion);
+        ui.showPrompt(ui.currentPrompt());
+        continue;
+      }
+      const decisionVersion = ui.decisionVersion();
+      await session.sendCommand(makeUserInputCommand(line, { askForPermission: true }));
+      await ui.waitForDecision(decisionVersion);
+      ui.showPrompt(ui.currentPrompt());
     }
 
     if (!closedByUser) {
@@ -158,9 +179,19 @@ async function runInteractiveLoop(
 
 function createRenderer(rawEvents: boolean) {
   let headerPrinted = false;
+  const pendingPermissions: PermissionEventPayload[] = [];
+  let decisionSignals = 0;
+  let notifyDecision: (() => void) | null = null;
 
   const print = (line: string) => {
     console.log(line);
+  };
+
+  const signalDecision = () => {
+    decisionSignals += 1;
+    const waiter = notifyDecision;
+    notifyDecision = null;
+    waiter?.();
   };
 
   return {
@@ -182,10 +213,43 @@ function createRenderer(rawEvents: boolean) {
       if (rendered !== "") {
         print(rendered);
       }
+
+      if (event.kind === "permission_requested" && event.payload.permission) {
+        pendingPermissions.push(event.payload.permission);
+      }
+      if (
+        event.kind === "permission_requested" ||
+        event.kind === "assistant_message" ||
+        event.kind === "failure" ||
+        event.kind === "session_closed"
+      ) {
+        signalDecision();
+      }
     },
-    showPrompt(): void {
+    decisionVersion(): number {
+      return decisionSignals;
+    },
+    waitForDecision(afterVersion: number): Promise<void> {
+      if (decisionSignals > afterVersion) {
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        notifyDecision = resolve;
+      });
+    },
+    currentPrompt(): string {
+      const pending = pendingPermissions[0];
+      if (pending) {
+        return `${pending.prompt} [y/N] `;
+      }
+      return "klaude> ";
+    },
+    takePendingPermission(): PermissionEventPayload | undefined {
+      return pendingPermissions.shift();
+    },
+    showPrompt(prompt: string): void {
       if (!rawEvents && process.stdout.isTTY) {
-        process.stdout.write("klaude> ");
+        process.stdout.write(prompt);
       }
     },
   };
@@ -242,6 +306,11 @@ function renderTerminalOutcome(state: SessionStateSnapshot | null): string {
     return "";
   }
   return `terminal_outcome: ${state.terminal_outcome || "none"}`;
+}
+
+function looksApproved(line: string): boolean {
+  const normalized = line.trim().toLowerCase();
+  return normalized === "y" || normalized === "yes";
 }
 
 function printHelp(): void {

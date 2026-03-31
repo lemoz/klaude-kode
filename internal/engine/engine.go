@@ -32,22 +32,40 @@ type InMemoryEngine struct {
 }
 
 type sessionRecord struct {
-	handle       contracts.SessionHandle
-	summary      contracts.SessionSummary
-	events       []contracts.SessionEvent
-	subscribers  map[uint64]chan contracts.SessionEvent
-	nextSequence int64
-	nextTurnID   int64
-	closed       bool
+	handle            contracts.SessionHandle
+	summary           contracts.SessionSummary
+	events            []contracts.SessionEvent
+	subscribers       map[uint64]chan contracts.SessionEvent
+	nextSequence      int64
+	nextTurnID        int64
+	closed            bool
+	pendingPermission *pendingPermissionState
 }
 
 type recordSnapshot struct {
-	handle       contracts.SessionHandle
-	summary      contracts.SessionSummary
-	nextSequence int64
-	nextTurnID   int64
-	closed       bool
-	events       []contracts.SessionEvent
+	handle            contracts.SessionHandle
+	summary           contracts.SessionSummary
+	nextSequence      int64
+	nextTurnID        int64
+	closed            bool
+	events            []contracts.SessionEvent
+	pendingPermission *pendingPermissionState
+}
+
+type pendingPermissionState struct {
+	RequestID    string
+	CommandID    string
+	TurnID       string
+	ToolCall     contracts.ToolCall
+	PolicySource string
+	Prompt       string
+	Scope        string
+}
+
+type turnResult struct {
+	Pending          bool
+	Outcome          contracts.TerminalOutcome
+	AssistantMessage string
 }
 
 func NewInMemoryEngine() *InMemoryEngine {
@@ -159,6 +177,10 @@ func (e *InMemoryEngine) SendCommand(_ context.Context, sessionID string, cmd co
 	switch cmd.Kind {
 	case contracts.CommandKindUserInput:
 		return e.handleUserInputLocked(record, cmd)
+	case contracts.CommandKindApprovePermission:
+		return e.handlePermissionResolutionLocked(record, cmd, true)
+	case contracts.CommandKindDenyPermission:
+		return e.handlePermissionResolutionLocked(record, cmd, false)
 	case contracts.CommandKindUpdateSessionSetting:
 		return e.handleSettingUpdateLocked(record, cmd)
 	case contracts.CommandKindCloseSession:
@@ -306,41 +328,16 @@ func (e *InMemoryEngine) handleUserInputLocked(record *sessionRecord, cmd contra
 	}
 
 	previousOutcome := record.summary.TerminalOutcome
-	outcome, assistantMessage, err := e.runTurnLocked(record, turnID, cmd.CommandID, text)
+	result, err := e.runTurnLocked(record, turnID, cmd.CommandID, text, cmd.Payload.Metadata)
 	if err != nil {
 		record.summary.TerminalOutcome = previousOutcome
 		return err
 	}
-
-	record.summary.TerminalOutcome = outcome
-	if _, err := e.appendEventLocked(record, contracts.EventKindAssistantMessage, contracts.SessionEventPayload{
-		CommandID: cmd.CommandID,
-		TurnID:    turnID,
-		Message: &contracts.CanonicalMessage{
-			Role:    "assistant",
-			Content: assistantMessage,
-		},
-	}); err != nil {
-		record.summary.TerminalOutcome = previousOutcome
-		return err
-	}
-	if _, err := e.appendEventLocked(record, contracts.EventKindLifecycle, contracts.SessionEventPayload{
-		CommandID:       cmd.CommandID,
-		TurnID:          turnID,
-		LifecycleName:   "turn_completed",
-		TerminalOutcome: outcome,
-	}); err != nil {
-		record.summary.TerminalOutcome = previousOutcome
-		return err
+	if result.Pending {
+		return nil
 	}
 
-	record.summary.TurnCount++
-	if _, err := e.appendEventLocked(record, contracts.EventKindSessionState, contracts.SessionEventPayload{
-		CommandID: cmd.CommandID,
-		TurnID:    turnID,
-		State:     e.nextStateSnapshotLocked(record),
-	}); err != nil {
-		record.summary.TurnCount--
+	if err := e.finishTurnLocked(record, cmd.CommandID, turnID, result.Outcome, result.AssistantMessage); err != nil {
 		record.summary.TerminalOutcome = previousOutcome
 		return err
 	}
@@ -373,6 +370,69 @@ func (e *InMemoryEngine) handleSettingUpdateLocked(record *sessionRecord, cmd co
 	return nil
 }
 
+func (e *InMemoryEngine) finishTurnLocked(record *sessionRecord, commandID string, turnID string, outcome contracts.TerminalOutcome, assistantMessage string) error {
+	record.summary.TerminalOutcome = outcome
+
+	if _, err := e.appendEventLocked(record, contracts.EventKindAssistantMessage, contracts.SessionEventPayload{
+		CommandID: commandID,
+		TurnID:    turnID,
+		Message: &contracts.CanonicalMessage{
+			Role:    "assistant",
+			Content: assistantMessage,
+		},
+	}); err != nil {
+		return err
+	}
+	if _, err := e.appendEventLocked(record, contracts.EventKindLifecycle, contracts.SessionEventPayload{
+		CommandID:       commandID,
+		TurnID:          turnID,
+		LifecycleName:   "turn_completed",
+		TerminalOutcome: outcome,
+	}); err != nil {
+		return err
+	}
+
+	record.summary.TurnCount++
+	if _, err := e.appendEventLocked(record, contracts.EventKindSessionState, contracts.SessionEventPayload{
+		CommandID: commandID,
+		TurnID:    turnID,
+		State:     e.nextStateSnapshotLocked(record),
+	}); err != nil {
+		record.summary.TurnCount--
+		return err
+	}
+	return nil
+}
+
+func (e *InMemoryEngine) handlePermissionResolutionLocked(record *sessionRecord, cmd contracts.SessionCommand, allow bool) error {
+	if record.pendingPermission == nil {
+		return fmt.Errorf("no permission request is pending")
+	}
+	pending := copyPendingPermission(record.pendingPermission)
+
+	requestID := strings.TrimSpace(cmd.Payload.RequestID)
+	if requestID == "" {
+		return fmt.Errorf("permission request_id is required")
+	}
+	if requestID != pending.RequestID {
+		return fmt.Errorf("unknown pending permission request: %s", requestID)
+	}
+
+	previousOutcome := record.summary.TerminalOutcome
+	result, err := e.resolvePendingPermissionLocked(record, cmd, allow)
+	if err != nil {
+		record.summary.TerminalOutcome = previousOutcome
+		return err
+	}
+
+	if err := e.finishTurnLocked(record, cmd.CommandID, pending.TurnID, result.Outcome, result.AssistantMessage); err != nil {
+		record.summary.TerminalOutcome = previousOutcome
+		return err
+	}
+	record.pendingPermission = nil
+	return nil
+}
+
 func (e *InMemoryEngine) closeSessionLocked(record *sessionRecord, reason string) error {
 	if record.closed {
 		return nil
@@ -381,6 +441,8 @@ func (e *InMemoryEngine) closeSessionLocked(record *sessionRecord, reason string
 	record.closed = true
 	record.summary.Status = contracts.SessionStatusClosed
 	record.summary.ClosedReason = reason
+	previousPending := copyPendingPermission(record.pendingPermission)
+	record.pendingPermission = nil
 
 	if _, err := e.appendEventLocked(record, contracts.EventKindSessionState, contracts.SessionEventPayload{
 		Reason: reason,
@@ -389,6 +451,7 @@ func (e *InMemoryEngine) closeSessionLocked(record *sessionRecord, reason string
 		record.closed = false
 		record.summary.Status = contracts.SessionStatusActive
 		record.summary.ClosedReason = ""
+		record.pendingPermission = previousPending
 		return err
 	}
 	if _, err := e.appendEventLocked(record, contracts.EventKindSessionClosed, contracts.SessionEventPayload{
@@ -397,6 +460,7 @@ func (e *InMemoryEngine) closeSessionLocked(record *sessionRecord, reason string
 		record.closed = false
 		record.summary.Status = contracts.SessionStatusActive
 		record.summary.ClosedReason = ""
+		record.pendingPermission = previousPending
 		return err
 	}
 
@@ -520,12 +584,13 @@ func (e *InMemoryEngine) removeSubscriber(sessionID string, subscriberID uint64)
 
 func snapshotRecord(record *sessionRecord) recordSnapshot {
 	return recordSnapshot{
-		handle:       record.handle,
-		summary:      record.summary,
-		nextSequence: record.nextSequence,
-		nextTurnID:   record.nextTurnID,
-		closed:       record.closed,
-		events:       append([]contracts.SessionEvent(nil), record.events...),
+		handle:            record.handle,
+		summary:           record.summary,
+		nextSequence:      record.nextSequence,
+		nextTurnID:        record.nextTurnID,
+		closed:            record.closed,
+		events:            append([]contracts.SessionEvent(nil), record.events...),
+		pendingPermission: copyPendingPermission(record.pendingPermission),
 	}
 }
 
@@ -536,6 +601,7 @@ func restoreRecord(record *sessionRecord, snapshot recordSnapshot) {
 	record.nextTurnID = snapshot.nextTurnID
 	record.closed = snapshot.closed
 	record.events = append(record.events[:0], snapshot.events...)
+	record.pendingPermission = copyPendingPermission(snapshot.pendingPermission)
 }
 
 func recordFromPersisted(summary contracts.SessionSummary, events []contracts.SessionEvent) *sessionRecord {
@@ -548,13 +614,116 @@ func recordFromPersisted(summary contracts.SessionSummary, events []contracts.Se
 			Model:     summary.Model,
 			CreatedAt: summary.CreatedAt,
 		},
-		summary:      summary,
-		events:       append([]contracts.SessionEvent(nil), events...),
-		subscribers:  make(map[uint64]chan contracts.SessionEvent),
-		nextSequence: summary.LastSequence,
-		nextTurnID:   int64(summary.TurnCount),
-		closed:       summary.Status == contracts.SessionStatusClosed,
+		summary:           summary,
+		events:            append([]contracts.SessionEvent(nil), events...),
+		subscribers:       make(map[uint64]chan contracts.SessionEvent),
+		nextSequence:      summary.LastSequence,
+		nextTurnID:        nextTurnIDFromEvents(summary, events),
+		closed:            summary.Status == contracts.SessionStatusClosed,
+		pendingPermission: pendingPermissionFromEvents(events),
 	}
+}
+
+func copyPendingPermission(pending *pendingPermissionState) *pendingPermissionState {
+	if pending == nil {
+		return nil
+	}
+
+	clonedCall := pending.ToolCall
+	if pending.ToolCall.Input != nil {
+		clonedCall.Input = make(map[string]any, len(pending.ToolCall.Input))
+		for key, value := range pending.ToolCall.Input {
+			clonedCall.Input[key] = value
+		}
+	}
+
+	return &pendingPermissionState{
+		RequestID:    pending.RequestID,
+		CommandID:    pending.CommandID,
+		TurnID:       pending.TurnID,
+		ToolCall:     clonedCall,
+		PolicySource: pending.PolicySource,
+		Prompt:       pending.Prompt,
+		Scope:        pending.Scope,
+	}
+}
+
+func nextTurnIDFromEvents(summary contracts.SessionSummary, events []contracts.SessionEvent) int64 {
+	maxTurnID := int64(summary.TurnCount)
+	for _, event := range events {
+		turnID := strings.TrimSpace(event.Payload.TurnID)
+		if turnID == "" || !strings.HasPrefix(turnID, "turn_") {
+			continue
+		}
+		var value int64
+		if _, err := fmt.Sscanf(turnID, "turn_%d", &value); err == nil && value > maxTurnID {
+			maxTurnID = value
+		}
+	}
+	return maxTurnID
+}
+
+func pendingPermissionFromEvents(events []contracts.SessionEvent) *pendingPermissionState {
+	toolCalls := make(map[string]pendingPermissionState)
+	var pending *pendingPermissionState
+
+	for _, event := range events {
+		switch event.Kind {
+		case contracts.EventKindToolCallRequested:
+			if event.Payload.Tool == nil {
+				continue
+			}
+			toolCalls[event.Payload.Tool.CallID] = pendingPermissionState{
+				CommandID: event.Payload.CommandID,
+				TurnID:    event.Payload.TurnID,
+				ToolCall: contracts.ToolCall{
+					ID:    event.Payload.Tool.CallID,
+					Name:  event.Payload.Tool.Name,
+					Input: copyToolInput(event.Payload.Tool.Input),
+				},
+			}
+		case contracts.EventKindPermissionRequested:
+			if event.Payload.Permission == nil {
+				continue
+			}
+			call := toolCalls[event.Payload.Permission.ToolCallID]
+			call.RequestID = event.Payload.Permission.RequestID
+			call.PolicySource = event.Payload.Permission.PolicySource
+			call.Prompt = event.Payload.Permission.Prompt
+			call.Scope = event.Payload.Permission.Scope
+			if call.CommandID == "" {
+				call.CommandID = event.Payload.CommandID
+			}
+			if call.TurnID == "" {
+				call.TurnID = event.Payload.TurnID
+			}
+			pending = &call
+		case contracts.EventKindPermissionResolved:
+			if pending == nil || event.Payload.Permission == nil {
+				continue
+			}
+			if pending.RequestID == event.Payload.Permission.RequestID {
+				pending = nil
+			}
+		case contracts.EventKindLifecycle:
+			if event.Payload.LifecycleName == "turn_completed" {
+				pending = nil
+			}
+		}
+	}
+
+	return copyPendingPermission(pending)
+}
+
+func copyToolInput(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func normalizeCommand(cmd contracts.SessionCommand) contracts.SessionCommand {
@@ -581,19 +750,25 @@ func scaffoldAssistantReply(model string, userText string) string {
 	)
 }
 
-func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, commandID string, userText string) (contracts.TerminalOutcome, string, error) {
+func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, commandID string, userText string, metadata map[string]string) (turnResult, error) {
 	call, isToolCall := toolruntime.ParseInlineToolCall(userText)
 	if !isToolCall {
-		return contracts.TerminalOutcomeSuccess, scaffoldAssistantReply(record.handle.Model, userText), nil
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeSuccess,
+			AssistantMessage: scaffoldAssistantReply(record.handle.Model, userText),
+		}, nil
 	}
 
 	call.ID = fmt.Sprintf("tool_%s_1", turnID)
 	descriptor, err := e.lookupToolDescriptorLocked(record, call.Name)
 	if err != nil {
 		if emitErr := e.emitTurnFailureLocked(record, turnID, commandID, err, contracts.TerminalOutcomeToolFailure); emitErr != nil {
-			return contracts.TerminalOutcomeNone, "", emitErr
+			return turnResult{}, emitErr
 		}
-		return contracts.TerminalOutcomeToolFailure, fmt.Sprintf("Tool %s failed: %v", call.Name, err), nil
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeToolFailure,
+			AssistantMessage: fmt.Sprintf("Tool %s failed: %v", call.Name, err),
+		}, nil
 	}
 
 	if _, err := e.appendEventLocked(record, contracts.EventKindToolCallRequested, contracts.SessionEventPayload{
@@ -606,40 +781,110 @@ func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, com
 			ConcurrencyClass: descriptor.ConcurrencyClass,
 		},
 	}); err != nil {
-		return contracts.TerminalOutcomeNone, "", err
+		return turnResult{}, err
 	}
 
 	if descriptor.RequiresPermission {
 		requestID := fmt.Sprintf("perm_%s", call.ID)
+		pending := &pendingPermissionState{
+			RequestID:    requestID,
+			CommandID:    commandID,
+			TurnID:       turnID,
+			ToolCall:     call,
+			PolicySource: "builtin_headless_policy",
+			Prompt:       fmt.Sprintf("Allow %s to access %s?", descriptor.Name, descriptor.PermissionScope),
+			Scope:        descriptor.PermissionScope,
+		}
+
+		record.pendingPermission = pending
 		if _, err := e.appendEventLocked(record, contracts.EventKindPermissionRequested, contracts.SessionEventPayload{
 			CommandID: commandID,
 			TurnID:    turnID,
 			Permission: &contracts.PermissionEventPayload{
-				RequestID:    requestID,
+				RequestID:    pending.RequestID,
 				ToolCallID:   call.ID,
-				PolicySource: "builtin_headless_policy",
-				Prompt:       fmt.Sprintf("Allow %s to access %s?", descriptor.Name, descriptor.PermissionScope),
-				Scope:        descriptor.PermissionScope,
+				PolicySource: pending.PolicySource,
+				Prompt:       pending.Prompt,
+				Scope:        pending.Scope,
 			},
 		}); err != nil {
-			return contracts.TerminalOutcomeNone, "", err
+			record.pendingPermission = nil
+			return turnResult{}, err
 		}
-		if _, err := e.appendEventLocked(record, contracts.EventKindPermissionResolved, contracts.SessionEventPayload{
+
+		if requiresInteractivePermission(metadata) {
+			return turnResult{Pending: true}, nil
+		}
+
+		result, err := e.resolvePendingPermissionLocked(record, contracts.SessionCommand{
 			CommandID: commandID,
-			TurnID:    turnID,
-			Permission: &contracts.PermissionEventPayload{
-				RequestID:    requestID,
-				ToolCallID:   call.ID,
-				PolicySource: "builtin_headless_policy",
-				Scope:        descriptor.PermissionScope,
-				Resolution:   "allow_once",
-				Actor:        "auto",
+			Payload: contracts.SessionCommandPayload{
+				RequestID: pending.RequestID,
 			},
-		}); err != nil {
-			return contracts.TerminalOutcomeNone, "", err
+		}, true)
+		record.pendingPermission = nil
+		return result, err
+	}
+
+	return e.executeToolCallLocked(record, turnID, commandID, call, descriptor)
+}
+
+func (e *InMemoryEngine) resolvePendingPermissionLocked(record *sessionRecord, cmd contracts.SessionCommand, allow bool) (turnResult, error) {
+	pending := record.pendingPermission
+	if pending == nil {
+		return turnResult{}, fmt.Errorf("no permission request is pending")
+	}
+
+	resolution := "deny"
+	actor := "user"
+	if allow {
+		resolution = "allow_once"
+		if cmd.CommandID == pending.CommandID {
+			actor = "auto"
 		}
 	}
 
+	if _, err := e.appendEventLocked(record, contracts.EventKindPermissionResolved, contracts.SessionEventPayload{
+		CommandID: cmd.CommandID,
+		TurnID:    pending.TurnID,
+		Permission: &contracts.PermissionEventPayload{
+			RequestID:    pending.RequestID,
+			ToolCallID:   pending.ToolCall.ID,
+			PolicySource: pending.PolicySource,
+			Scope:        pending.Scope,
+			Resolution:   resolution,
+			Actor:        actor,
+		},
+	}); err != nil {
+		return turnResult{}, err
+	}
+
+	if !allow {
+		err := fmt.Errorf("permission denied for tool %s", pending.ToolCall.Name)
+		if emitErr := e.emitFailureLocked(record, pending.TurnID, cmd.CommandID, contracts.FailureCategoryPermission, "permission_denied", err, contracts.TerminalOutcomeTaskFailure); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeTaskFailure,
+			AssistantMessage: fmt.Sprintf("Permission denied for tool %s.", pending.ToolCall.Name),
+		}, nil
+	}
+
+	descriptor, err := e.lookupToolDescriptorLocked(record, pending.ToolCall.Name)
+	if err != nil {
+		if emitErr := e.emitFailureLocked(record, pending.TurnID, cmd.CommandID, contracts.FailureCategoryTool, "tool_lookup_failed", err, contracts.TerminalOutcomeToolFailure); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeToolFailure,
+			AssistantMessage: fmt.Sprintf("Tool %s failed: %v", pending.ToolCall.Name, err),
+		}, nil
+	}
+
+	return e.executeToolCallLocked(record, pending.TurnID, cmd.CommandID, pending.ToolCall, descriptor)
+}
+
+func (e *InMemoryEngine) executeToolCallLocked(record *sessionRecord, turnID string, commandID string, call contracts.ToolCall, descriptor contracts.ToolDescriptor) (turnResult, error) {
 	sessionContext := contracts.SessionContext{
 		SessionID: record.handle.SessionID,
 		CWD:       record.handle.CWD,
@@ -650,9 +895,12 @@ func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, com
 	stream, err := e.toolRuntime.ExecuteTool(context.Background(), sessionContext, call)
 	if err != nil {
 		if emitErr := e.emitTurnFailureLocked(record, turnID, commandID, err, contracts.TerminalOutcomeToolFailure); emitErr != nil {
-			return contracts.TerminalOutcomeNone, "", emitErr
+			return turnResult{}, emitErr
 		}
-		return contracts.TerminalOutcomeToolFailure, fmt.Sprintf("Tool %s failed: %v", call.Name, err), nil
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeToolFailure,
+			AssistantMessage: fmt.Sprintf("Tool %s failed: %v", call.Name, err),
+		}, nil
 	}
 
 	resultSummary := ""
@@ -672,7 +920,7 @@ func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, com
 					ProgressMessage:  toolEvent.Message,
 				},
 			}); err != nil {
-				return contracts.TerminalOutcomeNone, "", err
+				return turnResult{}, err
 			}
 		case contracts.ToolEventKindCompleted:
 			resultSummary = toolEvent.ResultSummary
@@ -694,18 +942,24 @@ func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, com
 			Failed:           failed,
 		},
 	}); err != nil {
-		return contracts.TerminalOutcomeNone, "", err
+		return turnResult{}, err
 	}
 
 	if failed {
 		err := fmt.Errorf("%s reported failure", call.Name)
 		if emitErr := e.emitTurnFailureLocked(record, turnID, commandID, err, contracts.TerminalOutcomeToolFailure); emitErr != nil {
-			return contracts.TerminalOutcomeNone, "", emitErr
+			return turnResult{}, emitErr
 		}
-		return contracts.TerminalOutcomeToolFailure, fmt.Sprintf("Tool %s failed: %s", call.Name, resultSummary), nil
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeToolFailure,
+			AssistantMessage: fmt.Sprintf("Tool %s failed: %s", call.Name, resultSummary),
+		}, nil
 	}
 
-	return contracts.TerminalOutcomeSuccess, fmt.Sprintf("Tool %s completed. %s Output: %s", call.Name, resultSummary, output), nil
+	return turnResult{
+		Outcome:          contracts.TerminalOutcomeSuccess,
+		AssistantMessage: fmt.Sprintf("Tool %s completed. %s Output: %s", call.Name, resultSummary, output),
+	}, nil
 }
 
 func (e *InMemoryEngine) lookupToolDescriptorLocked(record *sessionRecord, name string) (contracts.ToolDescriptor, error) {
@@ -727,13 +981,24 @@ func (e *InMemoryEngine) lookupToolDescriptorLocked(record *sessionRecord, name 
 	return contracts.ToolDescriptor{}, fmt.Errorf("unknown tool: %s", name)
 }
 
+func requiresInteractivePermission(metadata map[string]string) bool {
+	if metadata == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(metadata["permission_mode"]), "ask")
+}
+
 func (e *InMemoryEngine) emitTurnFailureLocked(record *sessionRecord, turnID string, commandID string, cause error, outcome contracts.TerminalOutcome) error {
+	return e.emitFailureLocked(record, turnID, commandID, contracts.FailureCategoryTool, "tool_execution_failed", cause, outcome)
+}
+
+func (e *InMemoryEngine) emitFailureLocked(record *sessionRecord, turnID string, commandID string, category contracts.FailureCategory, code string, cause error, outcome contracts.TerminalOutcome) error {
 	if _, err := e.appendEventLocked(record, contracts.EventKindFailure, contracts.SessionEventPayload{
 		CommandID: commandID,
 		TurnID:    turnID,
 		Failure: &contracts.FailurePayload{
-			Category:  contracts.FailureCategoryTool,
-			Code:      "tool_execution_failed",
+			Category:  category,
+			Code:      code,
 			Message:   cause.Error(),
 			Retryable: false,
 		},

@@ -228,6 +228,133 @@ func TestToolTurnEmitsPermissionAndToolLifecycle(t *testing.T) {
 	}
 }
 
+func TestToolTurnWaitsForInteractivePermissionResolution(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_permission_wait",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	err = runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "tool:pwd",
+			Source: contracts.MessageSourceInteractive,
+			Metadata: map[string]string{
+				"permission_mode": "ask",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) != 6 {
+		t.Fatalf("expected 6 events before permission resolution, got %d", len(events))
+	}
+	if events[5].Kind != contracts.EventKindPermissionRequested {
+		t.Fatalf("expected permission_requested, got %s", events[5].Kind)
+	}
+
+	err = runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindApprovePermission,
+		Payload: contracts.SessionCommandPayload{
+			RequestID: "perm_tool_turn_1_1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApprovePermission returned error: %v", err)
+	}
+
+	events, err = runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) != 12 {
+		t.Fatalf("expected 12 events after permission approval, got %d", len(events))
+	}
+	if events[6].Kind != contracts.EventKindPermissionResolved {
+		t.Fatalf("expected permission_resolved after approval, got %s", events[6].Kind)
+	}
+	if events[9].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message after approval flow, got %s", events[9].Kind)
+	}
+	if events[10].Payload.TerminalOutcome != contracts.TerminalOutcomeSuccess {
+		t.Fatalf("expected success outcome after approval, got %s", events[10].Payload.TerminalOutcome)
+	}
+}
+
+func TestDenyPermissionCompletesTurnWithFailure(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_permission_deny",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	err = runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "tool:pwd",
+			Source: contracts.MessageSourceInteractive,
+			Metadata: map[string]string{
+				"permission_mode": "ask",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	err = runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindDenyPermission,
+		Payload: contracts.SessionCommandPayload{
+			RequestID: "perm_tool_turn_1_1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DenyPermission returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) != 11 {
+		t.Fatalf("expected 11 events after permission denial, got %d", len(events))
+	}
+	if events[6].Kind != contracts.EventKindPermissionResolved {
+		t.Fatalf("expected permission_resolved, got %s", events[6].Kind)
+	}
+	if events[6].Payload.Permission == nil || events[6].Payload.Permission.Resolution != "deny" {
+		t.Fatalf("expected deny resolution, got %#v", events[6].Payload.Permission)
+	}
+	if events[7].Kind != contracts.EventKindFailure {
+		t.Fatalf("expected failure event after denial, got %s", events[7].Kind)
+	}
+	if events[7].Payload.Failure == nil || events[7].Payload.Failure.Category != contracts.FailureCategoryPermission {
+		t.Fatalf("expected permission failure payload, got %#v", events[7].Payload.Failure)
+	}
+	if events[10].Kind != contracts.EventKindSessionState || events[10].Payload.State == nil || events[10].Payload.State.TerminalOutcome != contracts.TerminalOutcomeTaskFailure {
+		t.Fatalf("expected task failure state after denial, got %#v", events[10].Payload.State)
+	}
+}
+
 func nextEvent(t *testing.T, stream <-chan contracts.SessionEvent) contracts.SessionEvent {
 	t.Helper()
 

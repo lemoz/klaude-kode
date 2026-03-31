@@ -171,6 +171,7 @@ type SessionCommand struct {
 
 type SessionCommandPayload struct {
 	TurnID       string            `json:"turn_id"`
+	RequestID    string            `json:"request_id"`
 	Source       MessageSource     `json:"source"`
 	Text         string            `json:"text"`
 	Name         string            `json:"name"`
