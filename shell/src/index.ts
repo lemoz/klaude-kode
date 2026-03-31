@@ -17,6 +17,8 @@ import {
   makeUpdateSessionSettingCommand,
   makeUserInputCommand,
   startEngineSession,
+  validateCandidate,
+  type CandidateValidationResult,
   type PermissionEventPayload,
   type ProfileStatus,
   exportReplayPack,
@@ -183,6 +185,12 @@ async function runInteractiveLoop(
         }
         if (slashCommand?.kind === "status") {
           renderStatus(ui, config, ui.currentState());
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "validate_candidate") {
+          const validation = await validateCandidate(config);
+          renderCandidateValidation(ui, validation);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -488,6 +496,7 @@ function parseSlashCommand(
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
   | { kind: "profiles" }
   | { kind: "status" }
+  | { kind: "validate_candidate" }
   | { kind: "export_replay"; outputPath: string }
   | { kind: "models"; profileId?: string }
   | { kind: "logout"; profileId: string }
@@ -505,6 +514,9 @@ function parseSlashCommand(
   }
   if (trimmed === "/status") {
     return { kind: "status" };
+  }
+  if (trimmed === "/validate-candidate") {
+    return { kind: "validate_candidate" };
   }
   if (trimmed.startsWith("/export-replay ")) {
     const outputPath = trimmed.slice("/export-replay ".length).trim();
@@ -712,6 +724,23 @@ function renderModelCatalog(
   }
 }
 
+function renderCandidateValidation(
+  ui: ReturnType<typeof createRenderer>,
+  validation: CandidateValidationResult,
+): void {
+  const issues = validation.issues ?? [];
+  ui.writeLine("candidate:");
+  ui.writeLine(`- valid: ${validation.valid}`);
+  ui.writeLine(`  root: ${validation.candidate.root}`);
+  ui.writeLine(`  engine_version: ${validation.candidate.engine_version}`);
+  ui.writeLine(`  shell_version: ${validation.candidate.shell_version}`);
+  ui.writeLine(`  default_profile: ${validation.candidate.default_profile_id}`);
+  ui.writeLine(`  default_model: ${validation.candidate.default_model}`);
+  if (issues.length > 0) {
+    ui.writeLine(`  issues: ${issues.join(" | ")}`);
+  }
+}
+
 function formatCapabilities(capabilities: ProfileStatus["capabilities"]): string {
   const enabled: string[] = [];
   if (capabilities.streaming) {
@@ -762,6 +791,7 @@ function printHelp(): void {
     "Interactive commands:",
     "  /profiles",
     "  /status",
+    "  /validate-candidate",
     "  /export-replay <path>",
     "  /models [profile-id]",
     "  /logout [anthropic|openrouter]",

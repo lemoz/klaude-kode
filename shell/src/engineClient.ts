@@ -125,6 +125,22 @@ export interface ReplayPack {
   events: SessionEvent[];
 }
 
+export interface CandidateBundle {
+  schema_version: string;
+  created_at: string;
+  root: string;
+  engine_version: string;
+  shell_version: string;
+  default_profile_id: string;
+  default_model: string;
+}
+
+export interface CandidateValidationResult {
+  valid: boolean;
+  issues: string[] | null;
+  candidate: CandidateBundle;
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -356,6 +372,18 @@ export async function exportReplayPack(
   }
   const stdout = await runEngineAdminCommand(args);
   return JSON.parse(stdout) as ReplayPack;
+}
+
+export async function validateCandidate(
+  config: Pick<ShellConfig, "stateRoot" | "cwd">,
+): Promise<CandidateValidationResult> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    "-validate-candidate",
+    `-cwd=${config.cwd}`,
+    `-state-root=${config.stateRoot}`,
+  ]);
+  return JSON.parse(stdout) as CandidateValidationResult;
 }
 
 export async function logoutProfile(
