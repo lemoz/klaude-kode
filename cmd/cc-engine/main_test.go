@@ -316,6 +316,9 @@ func TestRunLogoutProfileClearsStoredAnthropicOAuthTokens(t *testing.T) {
 	if catalog.Profiles[0].Validation.Valid {
 		t.Fatalf("expected logged out anthropic profile to be invalid until relogin")
 	}
+	if catalog.Profiles[0].Auth.State != contracts.ProfileAuthStateLoggedOut {
+		t.Fatalf("expected logged out auth state, got %s", catalog.Profiles[0].Auth.State)
+	}
 }
 
 func TestResumePersistedSession(t *testing.T) {

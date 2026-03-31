@@ -98,6 +98,9 @@ func TestListProfilesReturnsStoredProfilesWithValidation(t *testing.T) {
 	if !profiles[0].Validation.Valid {
 		t.Fatalf("expected first profile to validate, got %#v", profiles[0].Validation)
 	}
+	if profiles[0].Auth.State != contracts.ProfileAuthStateLoggedOut {
+		t.Fatalf("expected seeded anthropic oauth profile to start logged_out, got %s", profiles[0].Auth.State)
+	}
 	if len(profiles[0].Models) == 0 {
 		t.Fatalf("expected provider models for first profile")
 	}
@@ -682,6 +685,46 @@ func TestAnthropicOAuthAuthFailureRefreshesAndRetriesOnce(t *testing.T) {
 	}
 	if events[4].Payload.Message == nil || !strings.Contains(events[4].Payload.Message.Content, "oauth retry reply") {
 		t.Fatalf("expected assistant message after oauth retry, got %#v", events[4].Payload.Message)
+	}
+}
+
+func TestListProfilesMarksExpiringAnthropicOAuthProfile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	runtime, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+	if _, err := runtime.SaveProfile(ctx, contracts.AuthProfile{
+		ID:           "anthropic-main",
+		Kind:         contracts.AuthProfileAnthropicOAuth,
+		Provider:     contracts.ProviderAnthropic,
+		DisplayName:  "Anthropic Main",
+		DefaultModel: "claude-sonnet-4-6",
+		Settings: map[string]string{
+			"oauth_access_token":  "access-token",
+			"oauth_refresh_token": "refresh-token",
+			"oauth_expires_at":    strconv.FormatInt(time.Now().UTC().Add(4*time.Minute).Unix(), 10),
+			"oauth_host":          "https://claude.ai",
+			"account_scope":       "claude",
+		},
+	}, false); err != nil {
+		t.Fatalf("SaveProfile returned error: %v", err)
+	}
+
+	profiles, err := runtime.ListProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListProfiles returned error: %v", err)
+	}
+	if profiles[0].Auth.State != contracts.ProfileAuthStateExpiring {
+		t.Fatalf("expected expiring auth state, got %s", profiles[0].Auth.State)
+	}
+	if !profiles[0].Auth.CanRefresh {
+		t.Fatalf("expected expiring profile to report can_refresh")
+	}
+	if profiles[0].Auth.ExpiresAt == "" {
+		t.Fatalf("expected expiring profile to expose expires_at")
 	}
 }
 

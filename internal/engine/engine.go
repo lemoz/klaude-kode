@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1281,6 +1282,7 @@ func (e *InMemoryEngine) buildProfileStatus(ctx context.Context, profile contrac
 			Valid:   true,
 			Message: "profile is valid",
 		},
+		Auth: describeProfileAuth(profile),
 	}
 
 	if e.providers != nil {
@@ -1318,6 +1320,71 @@ func clearedProfileAuthSettings(profile contracts.AuthProfile) map[string]string
 		delete(cleared, key)
 	}
 	return cleared
+}
+
+func describeProfileAuth(profile contracts.AuthProfile) contracts.ProfileAuthStatus {
+	switch profile.Kind {
+	case contracts.AuthProfileAnthropicOAuth:
+		accessToken := strings.TrimSpace(profile.Settings["oauth_access_token"])
+		expiresAt := strings.TrimSpace(profile.Settings["oauth_expires_at"])
+		canRefresh := strings.TrimSpace(profile.Settings["oauth_refresh_token"]) != ""
+		if accessToken == "" {
+			return contracts.ProfileAuthStatus{
+				State:      contracts.ProfileAuthStateLoggedOut,
+				ExpiresAt:  expiresAt,
+				CanRefresh: canRefresh,
+			}
+		}
+		if expiresAt == "" {
+			return contracts.ProfileAuthStatus{
+				State:      contracts.ProfileAuthStateAuthenticated,
+				CanRefresh: canRefresh,
+			}
+		}
+		unixSeconds, err := strconv.ParseInt(expiresAt, 10, 64)
+		if err != nil {
+			return contracts.ProfileAuthStatus{
+				State:      contracts.ProfileAuthStateAuthenticated,
+				ExpiresAt:  expiresAt,
+				CanRefresh: canRefresh,
+			}
+		}
+		expiration := time.Unix(unixSeconds, 0).UTC()
+		if time.Now().UTC().After(expiration) {
+			return contracts.ProfileAuthStatus{
+				State:      contracts.ProfileAuthStateExpired,
+				ExpiresAt:  expiration.Format(time.RFC3339),
+				CanRefresh: canRefresh,
+			}
+		}
+		state := contracts.ProfileAuthStateAuthenticated
+		if anthropicoauth.ShouldRefresh(profile) {
+			state = contracts.ProfileAuthStateExpiring
+		}
+		return contracts.ProfileAuthStatus{
+			State:      state,
+			ExpiresAt:  expiration.Format(time.RFC3339),
+			CanRefresh: canRefresh,
+		}
+	default:
+		if hasStoredCredential(profile) {
+			return contracts.ProfileAuthStatus{
+				State: contracts.ProfileAuthStateConfigured,
+			}
+		}
+		return contracts.ProfileAuthStatus{
+			State: contracts.ProfileAuthStateLoggedOut,
+		}
+	}
+}
+
+func hasStoredCredential(profile contracts.AuthProfile) bool {
+	for _, key := range []string{"credential_ref", "api_key", "access_token"} {
+		if strings.TrimSpace(profile.Settings[key]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func classifyProviderFailure(err error) (contracts.FailureCategory, string, contracts.TerminalOutcome, bool, string) {

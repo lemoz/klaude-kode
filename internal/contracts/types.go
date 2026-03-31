@@ -291,10 +291,27 @@ type ProfileValidationResult struct {
 	Message string `json:"message"`
 }
 
+type ProfileAuthState string
+
+const (
+	ProfileAuthStateConfigured     ProfileAuthState = "configured"
+	ProfileAuthStateAuthenticated  ProfileAuthState = "authenticated"
+	ProfileAuthStateExpiring       ProfileAuthState = "expiring"
+	ProfileAuthStateExpired        ProfileAuthState = "expired"
+	ProfileAuthStateLoggedOut      ProfileAuthState = "logged_out"
+)
+
+type ProfileAuthStatus struct {
+	State      ProfileAuthState `json:"state"`
+	ExpiresAt  string           `json:"expires_at"`
+	CanRefresh bool             `json:"can_refresh"`
+}
+
 type ProfileStatus struct {
 	Profile    AuthProfile             `json:"profile"`
 	Validation ProfileValidationResult `json:"validation"`
 	Models     []string                `json:"models"`
+	Auth       ProfileAuthStatus       `json:"auth"`
 }
 
 type ToolDescriptor struct {

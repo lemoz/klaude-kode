@@ -547,8 +547,14 @@ function renderProfiles(
   ui.writeLine("profiles:");
   for (const entry of profiles) {
     ui.writeLine(
-      `- ${entry.profile.id} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid}`,
+      `- ${entry.profile.id} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid} auth=${entry.auth.state}`,
     );
+    if (entry.auth.expires_at !== "") {
+      ui.writeLine(`  expires_at: ${entry.auth.expires_at}`);
+    }
+    if (entry.auth.can_refresh) {
+      ui.writeLine("  can_refresh: true");
+    }
     if (entry.validation.message !== "") {
       ui.writeLine(`  validation: ${entry.validation.message}`);
     }

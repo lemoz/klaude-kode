@@ -62,10 +62,17 @@ export interface ProfileValidationResult {
   message: string;
 }
 
+export interface ProfileAuthStatus {
+  state: string;
+  expires_at: string;
+  can_refresh: boolean;
+}
+
 export interface ProfileStatus {
   profile: AuthProfile;
   validation: ProfileValidationResult;
   models: string[];
+  auth: ProfileAuthStatus;
 }
 
 export interface SessionStateSnapshot {
