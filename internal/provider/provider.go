@@ -2,9 +2,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
 )
+
+var ErrCompletionNotImplemented = errors.New("provider completion not implemented")
 
 type Adapter interface {
 	Kind() contracts.ProviderKind
@@ -15,4 +18,3 @@ type Adapter interface {
 	ValidateProfile(ctx context.Context, profile contracts.AuthProfile) (contracts.ProfileValidationResult, error)
 	Capabilities(ctx context.Context, profile contracts.AuthProfile, model string) (contracts.CapabilitySet, error)
 }
-
