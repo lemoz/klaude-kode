@@ -213,6 +213,45 @@ func TestRunStatusText(t *testing.T) {
 	}
 }
 
+func TestRunExportReplayPackText(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state-root")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-format=json",
+		"-prompt=replay seed",
+		"-session-id=replay-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("seed run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-export-replay-pack",
+		"-resume-session=replay-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("export replay run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc replay pack") {
+		t.Fatalf("expected replay pack header, got %q", output)
+	}
+	if !strings.Contains(output, "session: replay-target") {
+		t.Fatalf("expected session id in replay output, got %q", output)
+	}
+	if !strings.Contains(output, "events: 10") {
+		t.Fatalf("expected event count in replay output, got %q", output)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 

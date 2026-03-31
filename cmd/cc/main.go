@@ -23,17 +23,18 @@ const (
 )
 
 type config struct {
-	Format          outputFormat
-	ListProfiles    bool
-	ListModels      bool
-	ShowStatus      bool
-	Prompt          string
-	SessionID       string
-	ResumeSessionID string
-	CWD             string
-	ProfileID       string
-	Model           string
-	StateRoot       string
+	Format           outputFormat
+	ListProfiles     bool
+	ListModels       bool
+	ShowStatus       bool
+	ExportReplayPack bool
+	Prompt           string
+	SessionID        string
+	ResumeSessionID  string
+	CWD              string
+	ProfileID        string
+	Model            string
+	StateRoot        string
 }
 
 type result struct {
@@ -105,6 +106,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return renderSessionStatus(ctx, runtime, cfg, stdout)
 	}
+	if cfg.ExportReplayPack {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-export-replay-pack does not support -format=events")
+		}
+		return renderReplayPack(ctx, runtime, cfg, stdout)
+	}
 	if cfg.ResumeSessionID != "" {
 		return renderPersistedSession(ctx, runtime, cfg, stdout)
 	}
@@ -125,6 +132,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
+	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "cc-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -145,17 +153,18 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	}
 
 	return config{
-		Format:          format,
-		ListProfiles:    *listProfilesValue,
-		ListModels:      *listModelsValue,
-		ShowStatus:      *showStatusValue,
-		Prompt:          strings.TrimSpace(*promptValue),
-		SessionID:       strings.TrimSpace(*sessionIDValue),
-		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
-		CWD:             strings.TrimSpace(*cwdValue),
-		ProfileID:       strings.TrimSpace(*profileIDValue),
-		Model:           strings.TrimSpace(*modelValue),
-		StateRoot:       strings.TrimSpace(*stateRootValue),
+		Format:           format,
+		ListProfiles:     *listProfilesValue,
+		ListModels:       *listModelsValue,
+		ShowStatus:       *showStatusValue,
+		ExportReplayPack: *exportReplayPackValue,
+		Prompt:           strings.TrimSpace(*promptValue),
+		SessionID:        strings.TrimSpace(*sessionIDValue),
+		ResumeSessionID:  strings.TrimSpace(*resumeSessionValue),
+		CWD:              strings.TrimSpace(*cwdValue),
+		ProfileID:        strings.TrimSpace(*profileIDValue),
+		Model:            strings.TrimSpace(*modelValue),
+		StateRoot:        strings.TrimSpace(*stateRootValue),
 	}, nil
 }
 
@@ -370,6 +379,32 @@ func renderSessionStatus(ctx context.Context, runtime engine.Engine, cfg config,
 	}
 }
 
+func renderReplayPack(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	sessionID := strings.TrimSpace(cfg.ResumeSessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(cfg.SessionID)
+	}
+	if sessionID == "" {
+		return fmt.Errorf("a session id is required for -export-replay-pack")
+	}
+
+	pack, err := engine.ExportReplayPack(ctx, runtime, sessionID)
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(pack)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderReplayPackText(stdout, pack)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatEvents:
@@ -457,6 +492,21 @@ func renderSessionStatusText(stdout io.Writer, result sessionStatusResult) error
 	}
 	if result.Summary.ClosedReason != "" {
 		lines = append(lines, fmt.Sprintf("closed_reason: %s", result.Summary.ClosedReason))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderReplayPackText(stdout io.Writer, pack contracts.ReplayPack) error {
+	lines := []string{
+		"cc replay pack",
+		fmt.Sprintf("session: %s", pack.Session.SessionID),
+		fmt.Sprintf("mode: %s", pack.Summary.Mode),
+		fmt.Sprintf("status: %s", pack.Summary.Status),
+		fmt.Sprintf("profile: %s", pack.Summary.ProfileID),
+		fmt.Sprintf("model: %s", pack.Summary.Model),
+		fmt.Sprintf("events: %d", len(pack.Events)),
+		fmt.Sprintf("terminal_outcome: %s", pack.Summary.TerminalOutcome),
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
