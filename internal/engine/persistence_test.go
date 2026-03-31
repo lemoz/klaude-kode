@@ -22,8 +22,8 @@ func TestFileBackedEnginePersistsReplayAndSessionIndex(t *testing.T) {
 		SessionID: "persisted-session",
 		CWD:       "/tmp/project",
 		Mode:      contracts.SessionModeHeadless,
-		ProfileID: "profile-a",
-		Model:     "model-a",
+		ProfileID: "anthropic-main",
+		Model:     "claude-sonnet-4-6",
 	})
 	if err != nil {
 		t.Fatalf("StartSession returned error: %v", err)
@@ -76,8 +76,8 @@ func TestFileBackedEngineResumeAcrossInstances(t *testing.T) {
 		SessionID: "resume-session",
 		CWD:       "/tmp/project",
 		Mode:      contracts.SessionModeHeadless,
-		ProfileID: "profile-a",
-		Model:     "model-a",
+		ProfileID: "anthropic-main",
+		Model:     "claude-sonnet-4-6",
 	})
 	if err != nil {
 		t.Fatalf("StartSession returned error: %v", err)
@@ -152,8 +152,8 @@ func TestFileBackedEngineResumesPendingPermissionRequests(t *testing.T) {
 		SessionID: "resume-pending-permission",
 		CWD:       "/tmp/project",
 		Mode:      contracts.SessionModeInteractive,
-		ProfileID: "profile-a",
-		Model:     "model-a",
+		ProfileID: "anthropic-main",
+		Model:     "claude-sonnet-4-6",
 	})
 	if err != nil {
 		t.Fatalf("StartSession returned error: %v", err)

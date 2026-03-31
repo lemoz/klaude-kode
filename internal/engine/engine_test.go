@@ -17,8 +17,8 @@ func TestStartSessionRecordsAuthoritativeEventLog(t *testing.T) {
 		SessionID: "sess_start",
 		CWD:       "/tmp/project",
 		Mode:      contracts.SessionModeInteractive,
-		ProfileID: "profile-a",
-		Model:     "model-a",
+		ProfileID: "anthropic-main",
+		Model:     "claude-sonnet-4-6",
 	})
 	if err != nil {
 		t.Fatalf("StartSession returned error: %v", err)
@@ -53,6 +53,27 @@ func TestStartSessionRecordsAuthoritativeEventLog(t *testing.T) {
 	}
 	if summary.LastSequence != 2 {
 		t.Fatalf("expected last sequence 2, got %d", summary.LastSequence)
+	}
+}
+
+func TestStartSessionAppliesStoredDefaultProfileAndModel(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_defaults",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if handle.ProfileID != "anthropic-main" {
+		t.Fatalf("expected stored default profile anthropic-main, got %s", handle.ProfileID)
+	}
+	if handle.Model != "claude-sonnet-4-6" {
+		t.Fatalf("expected stored default model claude-sonnet-4-6, got %s", handle.Model)
 	}
 }
 
@@ -159,7 +180,7 @@ func TestNonToolTurnRoutesThroughOpenRouterWhenModelRequiresIt(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionSettingChangesProviderRoute(t *testing.T) {
+func TestUpdateSessionSettingChangesActiveModel(t *testing.T) {
 	ctx := context.Background()
 	runtime := NewInMemoryEngine()
 
@@ -177,7 +198,7 @@ func TestUpdateSessionSettingChangesProviderRoute(t *testing.T) {
 		Kind: contracts.CommandKindUpdateSessionSetting,
 		Payload: contracts.SessionCommandPayload{
 			SettingKey:   "model",
-			SettingValue: "openrouter/auto",
+			SettingValue: "claude-opus-4-6",
 		},
 	}); err != nil {
 		t.Fatalf("UpdateSessionSetting returned error: %v", err)
@@ -196,7 +217,7 @@ func TestUpdateSessionSettingChangesProviderRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSessionSummary returned error: %v", err)
 	}
-	if summary.Model != "openrouter/auto" {
+	if summary.Model != "claude-opus-4-6" {
 		t.Fatalf("expected updated model in summary, got %q", summary.Model)
 	}
 
@@ -210,8 +231,67 @@ func TestUpdateSessionSettingChangesProviderRoute(t *testing.T) {
 			lastAssistant = *event.Payload.Message
 		}
 	}
-	if !strings.Contains(lastAssistant.Content, "OpenRouter response from openrouter/auto") {
-		t.Fatalf("expected openrouter response after model switch, got %q", lastAssistant.Content)
+	if !strings.Contains(lastAssistant.Content, "Anthropic response from claude-opus-4-6") {
+		t.Fatalf("expected anthropic response after model switch, got %q", lastAssistant.Content)
+	}
+}
+
+func TestProfileSwitchAdoptsStoredProfileDefaults(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_profile_switch_defaults",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUpdateSessionSetting,
+		Payload: contracts.SessionCommandPayload{
+			SettingKey:   "profile_id",
+			SettingValue: "openrouter-main",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateSessionSetting returned error: %v", err)
+	}
+
+	summary, err := runtime.GetSessionSummary(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("GetSessionSummary returned error: %v", err)
+	}
+	if summary.ProfileID != "openrouter-main" {
+		t.Fatalf("expected openrouter-main profile after switch, got %s", summary.ProfileID)
+	}
+	if summary.Model != "anthropic/claude-sonnet-4.5" {
+		t.Fatalf("expected openrouter default model after profile switch, got %s", summary.Model)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello after profile switch",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	lastAssistant := contracts.CanonicalMessage{}
+	for _, event := range events {
+		if event.Kind == contracts.EventKindAssistantMessage && event.Payload.Message != nil {
+			lastAssistant = *event.Payload.Message
+		}
+	}
+	if !strings.Contains(lastAssistant.Content, "OpenRouter response from anthropic/claude-sonnet-4.5") {
+		t.Fatalf("expected stored openrouter default model in assistant response, got %q", lastAssistant.Content)
 	}
 }
 

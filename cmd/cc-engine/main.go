@@ -98,8 +98,8 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	sessionIDValue := fs.String("session-id", "engine-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
 	cwdValue := fs.String("cwd", mustGetwd(), "session working directory")
-	profileIDValue := fs.String("profile-id", "headless-default", "active auth profile id")
-	modelValue := fs.String("model", "bootstrap-model", "active model id")
+	profileIDValue := fs.String("profile-id", "", "active auth profile id")
+	modelValue := fs.String("model", "", "active model id")
 	stateRootValue := fs.String("state-root", engine.DefaultStateRoot(), "engine state root")
 
 	if err := fs.Parse(args); err != nil {

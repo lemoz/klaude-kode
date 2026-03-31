@@ -41,6 +41,15 @@ func ResolveSessionProfile(profileID string, model string) contracts.AuthProfile
 	}
 }
 
+func IsLegacyProfileID(profileID string) bool {
+	switch strings.ToLower(strings.TrimSpace(profileID)) {
+	case "", "default", "shell-default", "local-default", "headless-default", "anthropic-default", "openrouter-default":
+		return true
+	default:
+		return false
+	}
+}
+
 func defaultModelForProvider(kind contracts.ProviderKind) string {
 	switch kind {
 	case contracts.ProviderOpenRouter:

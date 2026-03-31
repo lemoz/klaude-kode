@@ -288,8 +288,8 @@ export function defaultShellConfig(): ShellConfig {
     sessionId: "shell-bootstrap",
     resumeSessionId: "",
     cwd: repoRoot,
-    profileId: "shell-default",
-    model: "shell-bootstrap-model",
+    profileId: "",
+    model: "",
     stateRoot: defaultStateRoot(),
     rawEvents: false,
   };

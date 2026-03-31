@@ -31,6 +31,7 @@ type InMemoryEngine struct {
 	store            sessionStore
 	toolRuntime      toolruntime.Runtime
 	providers        *provider.Registry
+	profileStore     provider.ProfileStore
 }
 
 type sessionRecord struct {
@@ -72,9 +73,10 @@ type turnResult struct {
 
 func NewInMemoryEngine() *InMemoryEngine {
 	return &InMemoryEngine{
-		sessions:    make(map[string]*sessionRecord),
-		toolRuntime: toolruntime.NewBuiltinRuntime(),
-		providers:   provider.DefaultRegistry(),
+		sessions:     make(map[string]*sessionRecord),
+		toolRuntime:  toolruntime.NewBuiltinRuntime(),
+		providers:    provider.DefaultRegistry(),
+		profileStore: provider.NewMemoryProfileStore(),
 	}
 }
 
@@ -83,16 +85,24 @@ func NewFileBackedEngine(root string) (*InMemoryEngine, error) {
 	if err != nil {
 		return nil, err
 	}
+	profileStore, err := provider.NewFileProfileStore(root)
+	if err != nil {
+		return nil, err
+	}
 	return &InMemoryEngine{
-		sessions:    make(map[string]*sessionRecord),
-		store:       store,
-		toolRuntime: toolruntime.NewBuiltinRuntime(),
-		providers:   provider.DefaultRegistry(),
+		sessions:     make(map[string]*sessionRecord),
+		store:        store,
+		toolRuntime:  toolruntime.NewBuiltinRuntime(),
+		providers:    provider.DefaultRegistry(),
+		profileStore: profileStore,
 	}, nil
 }
 
 func (e *InMemoryEngine) StartSession(_ context.Context, req contracts.StartSessionRequest) (contracts.SessionHandle, error) {
 	now := time.Now().UTC()
+	if err := e.applyProfileDefaults(&req); err != nil {
+		return contracts.SessionHandle{}, err
+	}
 	sessionID := req.SessionID
 	if sessionID == "" {
 		sessionID = fmt.Sprintf("sess_%d", now.UnixNano())
@@ -357,8 +367,14 @@ func (e *InMemoryEngine) handleSettingUpdateLocked(record *sessionRecord, cmd co
 		record.handle.Model = cmd.Payload.SettingValue
 		record.summary.Model = cmd.Payload.SettingValue
 	case "profile_id":
-		record.handle.ProfileID = cmd.Payload.SettingValue
-		record.summary.ProfileID = cmd.Payload.SettingValue
+		nextProfile, nextModel, err := e.resolveProfileSetting(record.handle.ProfileID, record.handle.Model, cmd.Payload.SettingValue)
+		if err != nil {
+			return err
+		}
+		record.handle.ProfileID = nextProfile
+		record.summary.ProfileID = nextProfile
+		record.handle.Model = nextModel
+		record.summary.Model = nextModel
 	default:
 		return fmt.Errorf("unsupported session setting: %s", cmd.Payload.SettingKey)
 	}
@@ -838,7 +854,16 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 		}, nil
 	}
 
-	profile := provider.ResolveSessionProfile(record.handle.ProfileID, record.handle.Model)
+	profile, err := e.resolveProfile(record.handle.ProfileID, record.handle.Model)
+	if err != nil {
+		if emitErr := e.emitFailureLocked(record, turnID, commandID, contracts.FailureCategoryAuth, "profile_resolution_failed", err, contracts.TerminalOutcomeProviderFailure); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeProviderFailure,
+			AssistantMessage: fmt.Sprintf("Provider setup failed: %v", err),
+		}, nil
+	}
 	validation, err := e.providers.ValidateProfile(context.Background(), profile)
 	if err != nil {
 		if emitErr := e.emitFailureLocked(record, turnID, commandID, contracts.FailureCategoryAuth, "profile_validation_failed", err, contracts.TerminalOutcomeProviderFailure); emitErr != nil {
@@ -1074,4 +1099,43 @@ func (e *InMemoryEngine) emitFailureLocked(record *sessionRecord, turnID string,
 	}
 	record.summary.TerminalOutcome = outcome
 	return nil
+}
+
+func (e *InMemoryEngine) applyProfileDefaults(req *contracts.StartSessionRequest) error {
+	profile, err := e.resolveProfile(req.ProfileID, req.Model)
+	if err != nil {
+		if strings.TrimSpace(req.ProfileID) != "" && !provider.IsLegacyProfileID(req.ProfileID) {
+			return err
+		}
+		return nil
+	}
+
+	if strings.TrimSpace(req.ProfileID) == "" || provider.IsLegacyProfileID(req.ProfileID) {
+		req.ProfileID = profile.ID
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		req.Model = profile.DefaultModel
+	}
+	return nil
+}
+
+func (e *InMemoryEngine) resolveProfileSetting(currentProfileID string, currentModel string, nextProfileID string) (string, string, error) {
+	profile, err := e.resolveProfile(nextProfileID, currentModel)
+	if err != nil {
+		return "", "", err
+	}
+
+	nextModel := currentModel
+	currentProfile, currentErr := e.resolveProfile(currentProfileID, currentModel)
+	if strings.TrimSpace(nextModel) == "" || (currentErr == nil && strings.TrimSpace(nextModel) == currentProfile.DefaultModel) {
+		nextModel = profile.DefaultModel
+	}
+	return profile.ID, nextModel, nil
+}
+
+func (e *InMemoryEngine) resolveProfile(profileID string, model string) (contracts.AuthProfile, error) {
+	if e.profileStore != nil {
+		return e.profileStore.ResolveProfile(profileID, model)
+	}
+	return provider.ResolveSessionProfile(profileID, model), nil
 }
