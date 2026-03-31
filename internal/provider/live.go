@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
 )
 
@@ -76,12 +77,20 @@ func (a *staticAdapter) maybeCompleteLive(ctx context.Context, profile contracts
 
 	apiBase := strings.TrimSpace(profile.Settings["api_base"])
 	if apiBase == "" {
-		return contracts.CompletionResult{}, false, nil
+		switch profile.Kind {
+		case contracts.AuthProfileAnthropicOAuth:
+			apiBase = anthropicoauth.DefaultAPIBase
+		default:
+			return contracts.CompletionResult{}, false, nil
+		}
 	}
 
 	switch profile.Kind {
+	case contracts.AuthProfileAnthropicOAuth:
+		result, err := completeAnthropicLive(ctx, apiBase, credential, req, model)
+		return result, true, err
 	case contracts.AuthProfileAnthropicAPIKey:
-		result, err := completeAnthropicLive(ctx, apiBase, credential.Value, req, model)
+		result, err := completeAnthropicLive(ctx, apiBase, credential, req, model)
 		return result, true, err
 	case contracts.AuthProfileOpenRouterAPIKey:
 		result, err := completeOpenRouterLive(ctx, apiBase, credential.Value, profile, req, model)
@@ -91,7 +100,7 @@ func (a *staticAdapter) maybeCompleteLive(ctx context.Context, profile contracts
 	}
 }
 
-func completeAnthropicLive(ctx context.Context, apiBase string, apiKey string, req contracts.CompletionRequest, model string) (contracts.CompletionResult, error) {
+func completeAnthropicLive(ctx context.Context, apiBase string, credential resolvedCredential, req contracts.CompletionRequest, model string) (contracts.CompletionResult, error) {
 	systemPrompt := strings.Join(req.SystemPrompt, "\n\n")
 	payload := anthropicMessageRequest{
 		Model:     model,
@@ -127,8 +136,14 @@ func completeAnthropicLive(ctx context.Context, apiBase string, apiKey string, r
 		return contracts.CompletionResult{}, err
 	}
 	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("x-api-key", apiKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	switch credential.Mode {
+	case credentialModeBearer:
+		httpReq.Header.Set("authorization", "Bearer "+credential.Value)
+		httpReq.Header.Set("anthropic-beta", anthropicoauth.OAuthBetaHeader)
+	default:
+		httpReq.Header.Set("x-api-key", credential.Value)
+	}
 
 	resp, err := defaultHTTPClient.Do(httpReq)
 	if err != nil {

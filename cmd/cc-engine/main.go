@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/engine"
 	"github.com/cdossman/klaude-kode/internal/provider"
@@ -29,6 +30,7 @@ type config struct {
 	Format          outputFormat
 	ListProfiles    bool
 	UpsertProfile   bool
+	AnthropicOAuthLogin bool
 	Prompt          string
 	SessionID       string
 	ResumeSessionID string
@@ -43,6 +45,7 @@ type config struct {
 	APIBase         string
 	OAuthHost       string
 	AccountScope    string
+	OAuthOpenBrowser bool
 	MakeDefault     bool
 	StateRoot       string
 }
@@ -58,6 +61,8 @@ type profileCatalogResult struct {
 	Engine   string                    `json:"engine"`
 	Profiles []contracts.ProfileStatus `json:"profiles"`
 }
+
+var performAnthropicOAuthLogin = anthropicoauth.PerformLogin
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -95,6 +100,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return upsertProfileAndRenderCatalog(ctx, runtime, cfg, stdout)
 	}
+	if cfg.AnthropicOAuthLogin {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-anthropic-oauth-login does not support -format=events")
+		}
+		return loginAnthropicOAuthAndRenderCatalog(ctx, runtime, cfg, stdout, stderr)
+	}
 
 	if cfg.Transport == "stdio" {
 		if cfg.Format != outputFormatEvents {
@@ -126,6 +137,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	formatValue := fs.String("format", string(outputFormatJSON), "output format: json, text, events")
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
+	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
 	promptValue := fs.String("prompt", "bootstrap hello from cc-engine", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "engine-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -140,6 +152,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	apiBaseValue := fs.String("api-base", "", "provider API base for -upsert-profile")
 	oauthHostValue := fs.String("oauth-host", "", "oauth host for anthropic_oauth profiles")
 	accountScopeValue := fs.String("account-scope", "", "account scope for anthropic_oauth profiles")
+	oauthOpenBrowserValue := fs.Bool("oauth-open-browser", true, "open the Anthropic OAuth URL in a browser")
 	makeDefaultValue := fs.Bool("make-default", false, "set the upserted profile as the default profile")
 	stateRootValue := fs.String("state-root", engine.DefaultStateRoot(), "engine state root")
 
@@ -166,6 +179,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		Format:          format,
 		ListProfiles:    *listProfilesValue,
 		UpsertProfile:   *upsertProfileValue,
+		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
@@ -180,6 +194,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		APIBase:         strings.TrimSpace(*apiBaseValue),
 		OAuthHost:       strings.TrimSpace(*oauthHostValue),
 		AccountScope:    strings.TrimSpace(*accountScopeValue),
+		OAuthOpenBrowser: *oauthOpenBrowserValue,
 		MakeDefault:     *makeDefaultValue,
 		StateRoot:       strings.TrimSpace(*stateRootValue),
 	}, nil
@@ -420,6 +435,43 @@ func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, c
 		return err
 	}
 	if _, err := runtime.SaveProfile(ctx, profile, cfg.MakeDefault); err != nil {
+		return err
+	}
+	return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
+}
+
+func loginAnthropicOAuthAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer, stderr io.Writer) error {
+	profileID := strings.TrimSpace(cfg.ProfileID)
+	if profileID == "" {
+		profileID = "anthropic-main"
+	}
+	displayName := strings.TrimSpace(cfg.DisplayName)
+	if displayName == "" {
+		displayName = "Anthropic Main"
+	}
+	defaultModel := strings.TrimSpace(cfg.DefaultModel)
+	if defaultModel == "" {
+		defaultModel = defaultModelForProvider(contracts.ProviderAnthropic)
+	}
+	accountScope := strings.TrimSpace(cfg.AccountScope)
+	if accountScope == "" {
+		accountScope = anthropicoauth.DefaultAccountScope
+	}
+
+	result, err := performAnthropicOAuthLogin(ctx, anthropicoauth.LoginOptions{
+		ProfileID:      profileID,
+		DisplayName:    displayName,
+		DefaultModel:   defaultModel,
+		AccountScope:   accountScope,
+		OAuthHost:      cfg.OAuthHost,
+		APIBase:        cfg.APIBase,
+		OpenBrowser:    cfg.OAuthOpenBrowser,
+		Output:         stderr,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := runtime.SaveProfile(ctx, result.Profile, cfg.MakeDefault); err != nil {
 		return err
 	}
 	return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)

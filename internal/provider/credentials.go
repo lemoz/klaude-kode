@@ -15,14 +15,23 @@ var ErrCredentialRefUnsupported = errors.New("credential reference scheme is uns
 type resolvedCredential struct {
 	Value  string
 	Source string
+	Mode   credentialMode
 }
 
+type credentialMode string
+
+const (
+	credentialModeAPIKey credentialMode = "api_key"
+	credentialModeBearer credentialMode = "bearer"
+)
+
 func resolveLiveCredential(profile contracts.AuthProfile) (resolvedCredential, error) {
-	for _, key := range []string{"api_key", "oauth_access_token", "access_token"} {
-		if value := strings.TrimSpace(profile.Settings[key]); value != "" {
+	for _, candidate := range credentialCandidates(profile.Kind) {
+		if value := strings.TrimSpace(profile.Settings[candidate.Key]); value != "" {
 			return resolvedCredential{
 				Value:  value,
-				Source: key,
+				Source: candidate.Key,
+				Mode:   candidate.Mode,
 			}, nil
 		}
 	}
@@ -51,10 +60,47 @@ func resolveLiveCredential(profile contracts.AuthProfile) (resolvedCredential, e
 		return resolvedCredential{
 			Value:  value,
 			Source: credentialRef,
+			Mode:   defaultCredentialModeForProfile(profile.Kind),
 		}, nil
 	}
 	if strings.HasPrefix(credentialRef, "keychain://") {
 		return resolvedCredential{}, fmt.Errorf("%w: %s", ErrCredentialRefUnsupported, credentialRef)
 	}
 	return resolvedCredential{}, fmt.Errorf("%w: %s", ErrCredentialRefUnsupported, credentialRef)
+}
+
+type credentialCandidate struct {
+	Key  string
+	Mode credentialMode
+}
+
+func credentialCandidates(kind contracts.AuthProfileKind) []credentialCandidate {
+	switch kind {
+	case contracts.AuthProfileAnthropicOAuth:
+		return []credentialCandidate{
+			{Key: "oauth_access_token", Mode: credentialModeBearer},
+			{Key: "access_token", Mode: credentialModeBearer},
+			{Key: "api_key", Mode: credentialModeAPIKey},
+		}
+	case contracts.AuthProfileOpenRouterAPIKey:
+		return []credentialCandidate{
+			{Key: "api_key", Mode: credentialModeBearer},
+			{Key: "access_token", Mode: credentialModeBearer},
+		}
+	case contracts.AuthProfileAnthropicAPIKey:
+		fallthrough
+	default:
+		return []credentialCandidate{
+			{Key: "api_key", Mode: credentialModeAPIKey},
+		}
+	}
+}
+
+func defaultCredentialModeForProfile(kind contracts.AuthProfileKind) credentialMode {
+	switch kind {
+	case contracts.AuthProfileAnthropicOAuth, contracts.AuthProfileOpenRouterAPIKey:
+		return credentialModeBearer
+	default:
+		return credentialModeAPIKey
+	}
 }

@@ -311,6 +311,56 @@ func TestCompleteUsesLiveAnthropicAPIWhenEnvCredentialAndAPIBasePresent(t *testi
 	}
 }
 
+func TestCompleteUsesLiveAnthropicOAuthWhenAccessTokenPresent(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("expected /v1/messages path, got %s", r.URL.Path)
+		}
+		if got := r.Header.Get("authorization"); got != "Bearer oauth-secret" {
+			t.Fatalf("expected bearer authorization header, got %q", got)
+		}
+		if got := r.Header.Get("anthropic-beta"); got != "oauth-2025-04-20" {
+			t.Fatalf("expected oauth beta header, got %q", got)
+		}
+		if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
+			t.Fatalf("expected anthropic-version header, got %q", got)
+		}
+
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"live anthropic oauth reply"}]}`))
+	}))
+	defer server.Close()
+
+	profile := contracts.AuthProfile{
+		ID:           "anthropic-main",
+		Kind:         contracts.AuthProfileAnthropicOAuth,
+		Provider:     contracts.ProviderAnthropic,
+		DefaultModel: "claude-sonnet-4-6",
+		Settings: map[string]string{
+			"oauth_access_token": "oauth-secret",
+			"oauth_host":         "https://claude.ai",
+			"account_scope":      "claude",
+			"api_base":           server.URL,
+		},
+	}
+
+	result, err := registry.Complete(ctx, profile, contracts.CompletionRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []contracts.CanonicalMessage{
+			{Role: "user", Content: "hello live anthropic oauth"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if result.Message.Content != "live anthropic oauth reply" {
+		t.Fatalf("expected live anthropic oauth reply, got %q", result.Message.Content)
+	}
+}
+
 func TestCompleteUsesLiveOpenRouterAPIWhenEnvCredentialAndAPIBasePresent(t *testing.T) {
 	ctx := context.Background()
 	registry := DefaultRegistry()

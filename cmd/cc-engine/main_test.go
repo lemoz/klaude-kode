@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
 )
 
@@ -186,6 +188,81 @@ func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	}
 	if got.Session.Model != "openrouter/auto" {
 		t.Fatalf("expected saved default model openrouter/auto, got %s", got.Session.Model)
+	}
+}
+
+func TestRunAnthropicOAuthLoginSavesDefaultProfile(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	original := performAnthropicOAuthLogin
+	t.Cleanup(func() {
+		performAnthropicOAuthLogin = original
+	})
+	performAnthropicOAuthLogin = func(_ context.Context, opts anthropicoauth.LoginOptions) (anthropicoauth.LoginResult, error) {
+		return anthropicoauth.LoginResult{
+			AuthURL: "https://claude.com/cai/oauth/authorize",
+			Profile: contracts.AuthProfile{
+				ID:           opts.ProfileID,
+				Kind:         contracts.AuthProfileAnthropicOAuth,
+				Provider:     contracts.ProviderAnthropic,
+				DisplayName:  opts.DisplayName,
+				DefaultModel: opts.DefaultModel,
+				Settings: map[string]string{
+					"oauth_host":         "https://claude.ai",
+					"account_scope":      "claude",
+					"oauth_access_token": "oauth-access",
+					"oauth_refresh_token": "oauth-refresh",
+					"api_base":           "https://api.anthropic.com",
+				},
+			},
+		}, nil
+	}
+
+	err := run([]string{
+		"-format=json",
+		"-anthropic-oauth-login",
+		"-profile-id=anthropic-main",
+		"-display-name=Anthropic Main",
+		"-default-model=claude-sonnet-4-6",
+		"-make-default",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("oauth login run returned error: %v", err)
+	}
+
+	var catalog profileCatalogResult
+	if err := json.Unmarshal(stdout.Bytes(), &catalog); err != nil {
+		t.Fatalf("failed to parse oauth profile catalog: %v", err)
+	}
+	if len(catalog.Profiles) == 0 {
+		t.Fatalf("expected at least one profile after oauth login")
+	}
+	if catalog.Profiles[0].Profile.ID != "anthropic-main" {
+		t.Fatalf("expected anthropic-main profile after oauth login, got %s", catalog.Profiles[0].Profile.ID)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-format=json",
+		"-prompt=hello oauth default",
+		"-session-id=oauth-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("follow-up run returned error: %v", err)
+	}
+
+	var got result
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse follow-up json output: %v", err)
+	}
+	if got.Session.ProfileID != "anthropic-main" {
+		t.Fatalf("expected anthropic-main as saved default, got %s", got.Session.ProfileID)
 	}
 }
 
