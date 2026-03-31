@@ -447,7 +447,7 @@ function renderEvent(event: SessionEvent): string {
       return event.payload.warning ? `warning: ${event.payload.warning}` : "";
     case "failure":
       return event.payload.failure
-        ? `failure:${event.payload.failure.category} ${event.payload.failure.message}`
+        ? `failure:${event.payload.failure.category}/${event.payload.failure.code} retryable=${event.payload.failure.retryable} ${event.payload.failure.message}`
         : "";
     case "session_closed":
       return `status: closed (${event.payload.reason || "no_reason"})`;
