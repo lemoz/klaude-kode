@@ -142,6 +142,14 @@ type SessionSummary struct {
 	TerminalOutcome TerminalOutcome `json:"terminal_outcome"`
 }
 
+type ReplayPack struct {
+	SchemaVersion string         `json:"schema_version"`
+	ExportedAt    time.Time      `json:"exported_at"`
+	Session       SessionHandle  `json:"session"`
+	Summary       SessionSummary `json:"summary"`
+	Events        []SessionEvent `json:"events"`
+}
+
 type SessionStateSnapshot struct {
 	CWD             string          `json:"cwd"`
 	Mode            SessionMode     `json:"mode"`

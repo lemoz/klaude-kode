@@ -201,3 +201,57 @@ func TestFileBackedEngineResumesPendingPermissionRequests(t *testing.T) {
 		t.Fatalf("expected permission_resolved after resume, got %s", events[6].Kind)
 	}
 }
+
+func TestExportReplayPackIncludesPersistedSessionState(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	runtime, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "replay-pack-session",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeHeadless,
+		ProfileID: "anthropic-main",
+		Model:     "claude-sonnet-4-6",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "export me",
+			Source: contracts.MessageSourcePrint,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+	if err := runtime.CloseSession(ctx, handle.SessionID, "done"); err != nil {
+		t.Fatalf("CloseSession returned error: %v", err)
+	}
+
+	pack, err := ExportReplayPack(ctx, runtime, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ExportReplayPack returned error: %v", err)
+	}
+	if pack.Session.SessionID != handle.SessionID {
+		t.Fatalf("expected replay pack session %s, got %s", handle.SessionID, pack.Session.SessionID)
+	}
+	if pack.Summary.Status != contracts.SessionStatusClosed {
+		t.Fatalf("expected closed summary in replay pack, got %s", pack.Summary.Status)
+	}
+	if len(pack.Events) == 0 {
+		t.Fatalf("expected replay pack events")
+	}
+	if pack.Events[len(pack.Events)-1].Kind != contracts.EventKindSessionClosed {
+		t.Fatalf("expected final replay event session_closed, got %s", pack.Events[len(pack.Events)-1].Kind)
+	}
+	if pack.ExportedAt.IsZero() {
+		t.Fatalf("expected exported_at to be populated")
+	}
+}
