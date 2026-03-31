@@ -974,6 +974,17 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 			AssistantMessage: assistantMessage,
 		}, nil
 	}
+	capabilities, err := e.providers.Capabilities(context.Background(), profile, model)
+	if err != nil {
+		category, code, outcome, retryable, assistantMessage := classifyProviderFailure(err)
+		if emitErr := e.emitFailureDetailedLocked(record, turnID, commandID, category, code, err, outcome, retryable); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          outcome,
+			AssistantMessage: assistantMessage,
+		}, nil
+	}
 
 	completionRequest := contracts.CompletionRequest{
 		TurnID: turnID,
@@ -986,12 +997,17 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 		},
 	}
 
-	assistantDeltas, completion, err := e.streamOrCompleteProviderTurn(record, turnID, commandID, profile, completionRequest)
+	assistantDeltas, completion, err := e.streamOrCompleteProviderTurn(record, turnID, commandID, profile, capabilities, completionRequest)
 	if shouldRetryOAuthCompletion(err, profile) {
 		refreshedProfile, refreshErr := e.maybeRefreshOAuthProfileLocked(context.Background(), profile, true)
 		if refreshErr == nil {
 			profile = refreshedProfile
-			assistantDeltas, completion, err = e.streamOrCompleteProviderTurn(record, turnID, commandID, profile, completionRequest)
+			capabilities, capErr := e.providers.Capabilities(context.Background(), profile, model)
+			if capErr != nil {
+				err = capErr
+			} else {
+				assistantDeltas, completion, err = e.streamOrCompleteProviderTurn(record, turnID, commandID, profile, capabilities, completionRequest)
+			}
 		} else {
 			err = &provider.Error{
 				Code:      provider.ErrorCodeAuthFailed,
@@ -1023,7 +1039,19 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 	}, nil
 }
 
-func (e *InMemoryEngine) streamOrCompleteProviderTurn(record *sessionRecord, turnID string, commandID string, profile contracts.AuthProfile, req contracts.CompletionRequest) ([]string, contracts.CompletionResult, error) {
+func (e *InMemoryEngine) streamOrCompleteProviderTurn(record *sessionRecord, turnID string, commandID string, profile contracts.AuthProfile, capabilities contracts.CapabilitySet, req contracts.CompletionRequest) ([]string, contracts.CompletionResult, error) {
+	if !capabilities.Streaming {
+		if _, err := e.appendEventLocked(record, contracts.EventKindWarning, contracts.SessionEventPayload{
+			CommandID: commandID,
+			TurnID:    turnID,
+			Warning:   fmt.Sprintf("provider %s model %s does not support streaming; falling back to complete response", profile.Provider, req.Model),
+		}); err != nil {
+			return nil, contracts.CompletionResult{}, err
+		}
+		completion, completeErr := e.providers.Complete(context.Background(), profile, req)
+		return nil, completion, completeErr
+	}
+
 	stream, err := e.providers.StreamCompletion(context.Background(), profile, req)
 	if err == nil && stream != nil {
 		deltas, streamErr := e.consumeProviderStreamLocked(record, turnID, commandID, stream)

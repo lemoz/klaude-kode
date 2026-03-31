@@ -13,6 +13,45 @@ import (
 	"github.com/cdossman/klaude-kode/internal/provider"
 )
 
+type nonStreamingAdapter struct{}
+
+func (a *nonStreamingAdapter) Kind() contracts.ProviderKind {
+	return contracts.ProviderAnthropic
+}
+
+func (a *nonStreamingAdapter) ListModels(_ context.Context, _ contracts.AuthProfile) ([]string, error) {
+	return []string{"claude-sonnet-4-6"}, nil
+}
+
+func (a *nonStreamingAdapter) CountTokens(_ context.Context, _ contracts.AuthProfile, _ contracts.TokenCountRequest) (contracts.TokenCountResult, error) {
+	return contracts.TokenCountResult{InputTokens: 1}, nil
+}
+
+func (a *nonStreamingAdapter) StreamCompletion(_ context.Context, _ contracts.AuthProfile, _ contracts.CompletionRequest) (<-chan contracts.ProviderEvent, error) {
+	return nil, provider.ErrCompletionNotImplemented
+}
+
+func (a *nonStreamingAdapter) Complete(_ context.Context, _ contracts.AuthProfile, _ contracts.CompletionRequest) (contracts.CompletionResult, error) {
+	return contracts.CompletionResult{
+		Message: contracts.CanonicalMessage{
+			Role:    "assistant",
+			Content: "non-streaming fallback reply",
+		},
+	}, nil
+}
+
+func (a *nonStreamingAdapter) ValidateProfile(_ context.Context, _ contracts.AuthProfile) (contracts.ProfileValidationResult, error) {
+	return contracts.ProfileValidationResult{Valid: true, Message: "profile is valid"}, nil
+}
+
+func (a *nonStreamingAdapter) Capabilities(_ context.Context, _ contracts.AuthProfile, _ string) (contracts.CapabilitySet, error) {
+	return contracts.CapabilitySet{
+		Streaming:         false,
+		ToolCalling:       true,
+		StructuredOutputs: true,
+	}, nil
+}
+
 func TestStartSessionRecordsAuthoritativeEventLog(t *testing.T) {
 	ctx := context.Background()
 	runtime := NewInMemoryEngine()
@@ -259,6 +298,55 @@ func TestNonToolTurnRoutesThroughOpenRouterWhenModelRequiresIt(t *testing.T) {
 	}
 	if events[5].Payload.Message == nil || !strings.Contains(events[5].Payload.Message.Content, "OpenRouter response from openrouter/auto") {
 		t.Fatalf("expected openrouter-backed assistant message, got %#v", events[5].Payload.Message)
+	}
+}
+
+func TestProviderTurnFallsBackWhenStreamingCapabilityDisabled(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+	runtime.providers = provider.NewRegistry(&nonStreamingAdapter{})
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_no_streaming",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: "anthropic-main",
+		Model:     "claude-sonnet-4-6",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello fallback",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if events[4].Kind != contracts.EventKindWarning {
+		t.Fatalf("expected warning event when streaming is unsupported, got %s", events[4].Kind)
+	}
+	if !strings.Contains(events[4].Payload.Warning, "does not support streaming") {
+		t.Fatalf("expected streaming fallback warning, got %q", events[4].Payload.Warning)
+	}
+	if events[5].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message after warning fallback, got %s", events[5].Kind)
+	}
+	if events[5].Payload.Message == nil || events[5].Payload.Message.Content != "non-streaming fallback reply" {
+		t.Fatalf("expected fallback assistant reply, got %#v", events[5].Payload.Message)
+	}
+	for _, event := range events {
+		if event.Kind == contracts.EventKindAssistantDelta {
+			t.Fatalf("did not expect assistant_delta when streaming capability is disabled")
+		}
 	}
 }
 
