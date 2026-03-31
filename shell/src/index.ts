@@ -6,12 +6,16 @@ import {
   defaultShellConfig,
   makeCloseSessionCommand,
   makeDenyPermissionCommand,
+  listProfiles,
+  loginOpenRouter,
   makeUpdateSessionSettingCommand,
   makeUserInputCommand,
   startEngineSession,
   type PermissionEventPayload,
+  type ProfileStatus,
   type SessionEvent,
   type SessionStateSnapshot,
+  type ShellConfig,
 } from "./engineClient.js";
 
 async function main(): Promise<void> {
@@ -32,7 +36,7 @@ async function main(): Promise<void> {
 
     console.log("Klaude Kode shell");
     console.log("Type /exit to close the session.");
-    await runInteractiveLoop(session, renderer);
+    await runInteractiveLoop(session, renderer, config);
     await session.done;
   } finally {
     await session.closeInput().catch(() => undefined);
@@ -124,6 +128,7 @@ function parseArgs(args: string[]) {
 async function runInteractiveLoop(
   session: Awaited<ReturnType<typeof startEngineSession>>,
   ui: ReturnType<typeof createRenderer>,
+  config: ShellConfig,
 ): Promise<void> {
   const rl = createInterface({
     input: process.stdin,
@@ -136,45 +141,71 @@ async function runInteractiveLoop(
     let closedByUser = false;
 
     for await (const rawLine of rl) {
-      const line = rawLine.trim();
-      if (line === "") {
-        ui.showPrompt(ui.currentPrompt());
-        continue;
-      }
-      if (line === "/exit") {
-        await session.sendCommand(makeCloseSessionCommand("shell_exit"));
-        await session.closeInput();
-        closedByUser = true;
-        break;
-      }
-      const slashCommand = parseSlashCommand(line);
-      if (slashCommand) {
-        const decisionVersion = ui.decisionVersion();
-        await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
-        await ui.waitForDecision(decisionVersion);
-        ui.showPrompt(ui.currentPrompt());
-        continue;
-      }
-      const pendingPermission = ui.takePendingPermission();
-      if (pendingPermission) {
-        const decisionVersion = ui.decisionVersion();
-        if (looksApproved(line)) {
-          await session.sendCommand(
-            makeApprovePermissionCommand(pendingPermission.request_id),
-          );
-        } else {
-          await session.sendCommand(
-            makeDenyPermissionCommand(pendingPermission.request_id),
-          );
+      try {
+        const line = rawLine.trim();
+        if (line === "") {
+          ui.showPrompt(ui.currentPrompt());
+          continue;
         }
+        if (line === "/exit") {
+          await session.sendCommand(makeCloseSessionCommand("shell_exit"));
+          await session.closeInput();
+          closedByUser = true;
+          break;
+        }
+        const slashCommand = parseSlashCommand(line);
+        if (slashCommand?.kind === "setting") {
+          const decisionVersion = ui.decisionVersion();
+          await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
+          await ui.waitForDecision(decisionVersion);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "profiles") {
+          const profiles = await listProfiles(config);
+          renderProfiles(ui, profiles);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "login_openrouter") {
+          const profiles = await loginOpenRouter(config, {
+            credential: slashCommand.credential,
+            defaultModel: slashCommand.defaultModel,
+            apiBase: slashCommand.apiBase,
+          });
+          ui.writeLine("login: saved openrouter-main and set it as default");
+          renderProfiles(ui, profiles);
+          const decisionVersion = ui.decisionVersion();
+          await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "openrouter-main"));
+          await ui.waitForDecision(decisionVersion);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        const pendingPermission = ui.takePendingPermission();
+        if (pendingPermission) {
+          const decisionVersion = ui.decisionVersion();
+          if (looksApproved(line)) {
+            await session.sendCommand(
+              makeApprovePermissionCommand(pendingPermission.request_id),
+            );
+          } else {
+            await session.sendCommand(
+              makeDenyPermissionCommand(pendingPermission.request_id),
+            );
+          }
+          await ui.waitForDecision(decisionVersion);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        const decisionVersion = ui.decisionVersion();
+        await session.sendCommand(makeUserInputCommand(line, { askForPermission: true }));
         await ui.waitForDecision(decisionVersion);
         ui.showPrompt(ui.currentPrompt());
-        continue;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ui.writeLine(`error: ${message}`);
+        ui.showPrompt(ui.currentPrompt());
       }
-      const decisionVersion = ui.decisionVersion();
-      await session.sendCommand(makeUserInputCommand(line, { askForPermission: true }));
-      await ui.waitForDecision(decisionVersion);
-      ui.showPrompt(ui.currentPrompt());
     }
 
     if (!closedByUser) {
@@ -276,6 +307,9 @@ function createRenderer(rawEvents: boolean) {
         process.stdout.write(prompt);
       }
     },
+    writeLine(line: string): void {
+      print(line);
+    },
   };
 }
 
@@ -339,25 +373,92 @@ function looksApproved(line: string): boolean {
 
 function parseSlashCommand(
   line: string,
-): { key: "model" | "profile_id"; value: string } | null {
+):
+  | { kind: "setting"; key: "model" | "profile_id"; value: string }
+  | { kind: "profiles" }
+  | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
+  | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith("/")) {
     return null;
   }
 
+  if (trimmed === "/profiles") {
+    return { kind: "profiles" };
+  }
   if (trimmed.startsWith("/model ")) {
     const value = trimmed.slice("/model ".length).trim();
     if (value !== "") {
-      return { key: "model", value };
+      return { kind: "setting", key: "model", value };
     }
   }
   if (trimmed.startsWith("/profile ")) {
     const value = trimmed.slice("/profile ".length).trim();
     if (value !== "") {
-      return { key: "profile_id", value };
+      return { kind: "setting", key: "profile_id", value };
     }
   }
+  if (trimmed.startsWith("/login ")) {
+    return parseLoginCommand(trimmed);
+  }
   return null;
+}
+
+function parseLoginCommand(
+  line: string,
+): { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string } | null {
+  const parts = line.split(/\s+/).slice(1);
+  if (parts.length < 2) {
+    throw new Error("usage: /login openrouter <env-var|credential-ref> [model=<id>] [api_base=<url>]");
+  }
+  const provider = parts[0]?.toLowerCase();
+  if (provider !== "openrouter") {
+    throw new Error(`unsupported login provider: ${parts[0]}`);
+  }
+
+  const credential = parts[1] ?? "";
+  if (credential.trim() === "") {
+    throw new Error("usage: /login openrouter <env-var|credential-ref> [model=<id>] [api_base=<url>]");
+  }
+
+  let defaultModel: string | undefined;
+  let apiBase: string | undefined;
+  for (const token of parts.slice(2)) {
+    if (token.startsWith("model=")) {
+      defaultModel = token.slice("model=".length);
+      continue;
+    }
+    if (token.startsWith("api_base=")) {
+      apiBase = token.slice("api_base=".length);
+      continue;
+    }
+    throw new Error(`unsupported login option: ${token}`);
+  }
+
+  return {
+    kind: "login_openrouter",
+    credential,
+    defaultModel,
+    apiBase,
+  };
+}
+
+function renderProfiles(
+  ui: ReturnType<typeof createRenderer>,
+  profiles: ProfileStatus[],
+): void {
+  ui.writeLine("profiles:");
+  for (const entry of profiles) {
+    ui.writeLine(
+      `- ${entry.profile.id} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid}`,
+    );
+    if (entry.validation.message !== "") {
+      ui.writeLine(`  validation: ${entry.validation.message}`);
+    }
+    if (entry.models.length > 0) {
+      ui.writeLine(`  models: ${entry.models.join(", ")}`);
+    }
+  }
 }
 
 function printHelp(): void {
@@ -373,6 +474,12 @@ function printHelp(): void {
     "  --model <id>               Active model id",
     "  --state-root <path>        Engine state root",
     "  --raw-events               Print canonical event JSON lines",
+    "",
+    "Interactive commands:",
+    "  /profiles",
+    "  /profile <id>",
+    "  /model <id>",
+    "  /login openrouter <env-var|credential-ref> [model=<id>] [api_base=<url>]",
   ];
   console.log(help.join("\n"));
 }

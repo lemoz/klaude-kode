@@ -48,6 +48,26 @@ export interface FailurePayload {
   retryable: boolean;
 }
 
+export interface AuthProfile {
+  id: string;
+  kind: string;
+  provider: string;
+  display_name: string;
+  default_model: string;
+  settings: Record<string, string>;
+}
+
+export interface ProfileValidationResult {
+  valid: boolean;
+  message: string;
+}
+
+export interface ProfileStatus {
+  profile: AuthProfile;
+  validation: ProfileValidationResult;
+  models: string[];
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -238,6 +258,48 @@ export function makeUpdateSessionSettingCommand(
   };
 }
 
+export async function listProfiles(config: Pick<ShellConfig, "stateRoot">): Promise<ProfileStatus[]> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    "-profiles",
+    `-state-root=${config.stateRoot}`,
+  ]);
+  const parsed = JSON.parse(stdout) as { profiles?: ProfileStatus[] };
+  return parsed.profiles ?? [];
+}
+
+export async function loginOpenRouter(
+  config: Pick<ShellConfig, "stateRoot">,
+  input: {
+    credential: string;
+    defaultModel?: string;
+    apiBase?: string;
+  },
+): Promise<ProfileStatus[]> {
+  const args = [
+    "-format=json",
+    "-upsert-profile",
+    "-profile-id=openrouter-main",
+    "-provider=openrouter",
+    "-profile-kind=openrouter_api_key",
+    "-display-name=OpenRouter Main",
+    `-credential-ref=${normalizeCredentialRef(input.credential)}`,
+    "-make-default",
+    `-state-root=${config.stateRoot}`,
+  ];
+
+  if (input.defaultModel && input.defaultModel.trim() !== "") {
+    args.push(`-default-model=${input.defaultModel.trim()}`);
+  }
+  if (input.apiBase && input.apiBase.trim() !== "") {
+    args.push(`-api-base=${input.apiBase.trim()}`);
+  }
+
+  const stdout = await runEngineAdminCommand(args);
+  const parsed = JSON.parse(stdout) as { profiles?: ProfileStatus[] };
+  return parsed.profiles ?? [];
+}
+
 function buildEngineArgs(config: ShellConfig): string[] {
   const args = [
     "run",
@@ -257,6 +319,43 @@ function buildEngineArgs(config: ShellConfig): string[] {
   }
 
   return args;
+}
+
+async function runEngineAdminCommand(args: string[]): Promise<string> {
+  const child = spawn("go", ["run", "./cmd/cc-engine", ...args], {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (!child.stdout || !child.stderr) {
+    throw new Error("cc-engine admin stdio pipes are unavailable");
+  }
+
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer | string) => {
+    stdoutChunks.push(Buffer.from(chunk));
+  });
+  child.stderr.on("data", (chunk: Buffer | string) => {
+    stderrChunks.push(Buffer.from(chunk));
+  });
+
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code) => resolve(code ?? 1));
+  });
+
+  const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+  const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+  if (exitCode !== 0) {
+    throw new Error(
+      stderr === ""
+        ? `cc-engine admin command exited with code ${exitCode}`
+        : `cc-engine admin command exited with code ${exitCode}: ${stderr}`,
+    );
+  }
+  return stdout;
 }
 
 function writeLine(
@@ -293,4 +392,15 @@ export function defaultShellConfig(): ShellConfig {
     stateRoot: defaultStateRoot(),
     rawEvents: false,
   };
+}
+
+function normalizeCredentialRef(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.includes("://")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("env:")) {
+    return `env://${trimmed.slice("env:".length)}`;
+  }
+  return `env://${trimmed}`;
 }

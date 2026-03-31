@@ -250,8 +250,19 @@ func (s *fileSessionStore) writeIndexLocked(index sessionIndexFile) error {
 		return err
 	}
 
-	tmpPath := s.indexPath() + ".tmp"
-	if err := os.WriteFile(tmpPath, append(data, '\n'), 0o644); err != nil {
+	tmpFile, err := os.CreateTemp(filepath.Dir(s.indexPath()), "session-index-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if _, err := tmpFile.Write(append(data, '\n')); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmpPath, s.indexPath())
