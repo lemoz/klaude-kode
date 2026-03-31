@@ -182,6 +182,49 @@ func TestRunModelsJSON(t *testing.T) {
 	}
 }
 
+func TestRunStatusJSON(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state-root")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-format=json",
+		"-prompt=status seed",
+		"-session-id=status-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("seed run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-format=json",
+		"-status",
+		"-resume-session=status-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("status run returned error: %v", err)
+	}
+
+	var got sessionStatusResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse status json output: %v", err)
+	}
+	if got.Session != "status-target" {
+		t.Fatalf("expected status-target session, got %s", got.Session)
+	}
+	if got.Summary.Status != contracts.SessionStatusClosed {
+		t.Fatalf("expected closed status, got %s", got.Summary.Status)
+	}
+	if got.Summary.EventCount == 0 {
+		t.Fatalf("expected event count in summary, got %#v", got.Summary)
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

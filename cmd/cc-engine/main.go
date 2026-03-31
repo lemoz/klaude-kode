@@ -30,6 +30,7 @@ type config struct {
 	Format              outputFormat
 	ListProfiles        bool
 	ListModels          bool
+	ShowStatus          bool
 	UpsertProfile       bool
 	AnthropicOAuthLogin bool
 	LogoutProfileID     string
@@ -72,6 +73,12 @@ type modelCatalogResult struct {
 	Capabilities contracts.CapabilitySet `json:"capabilities"`
 }
 
+type sessionStatusResult struct {
+	Engine  string                   `json:"engine"`
+	Session string                   `json:"session"`
+	Summary contracts.SessionSummary `json:"summary"`
+}
+
 var performAnthropicOAuthLogin = anthropicoauth.PerformLogin
 
 func main() {
@@ -109,6 +116,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 			return fmt.Errorf("-models does not support -format=events")
 		}
 		return renderModelCatalog(ctx, runtime, cfg, stdout)
+	}
+	if cfg.ShowStatus {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-status does not support -format=events")
+		}
+		return renderSessionStatus(ctx, runtime, cfg, stdout)
 	}
 	if cfg.UpsertProfile {
 		if cfg.Format == outputFormatEvents {
@@ -159,6 +172,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	formatValue := fs.String("format", string(outputFormatJSON), "output format: json, text, events")
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
+	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
 	logoutProfileValue := fs.String("logout-profile", "", "clear stored auth from the specified profile and exit")
@@ -203,6 +217,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		Format:              format,
 		ListProfiles:        *listProfilesValue,
 		ListModels:          *listModelsValue,
+		ShowStatus:          *showStatusValue,
 		UpsertProfile:       *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
 		LogoutProfileID:     strings.TrimSpace(*logoutProfileValue),
@@ -489,6 +504,38 @@ func renderModelCatalog(ctx context.Context, runtime engine.Engine, cfg config, 
 	}
 }
 
+func renderSessionStatus(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	sessionID := strings.TrimSpace(cfg.ResumeSessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(cfg.SessionID)
+	}
+	if sessionID == "" {
+		return fmt.Errorf("a session id is required for -status")
+	}
+
+	summary, err := runtime.GetSessionSummary(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	result := sessionStatusResult{
+		Engine:  "cc-engine",
+		Session: sessionID,
+		Summary: summary,
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderSessionStatusText(stdout, result)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+}
+
 func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
 	profile, err := buildProfileFromConfig(cfg)
 	if err != nil {
@@ -603,6 +650,26 @@ func renderModelCatalogText(stdout io.Writer, catalog modelCatalogResult) error 
 	}
 	if caps := formatCapabilities(catalog.Capabilities); caps != "" {
 		lines = append(lines, fmt.Sprintf("capabilities: %s", caps))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderSessionStatusText(stdout io.Writer, result sessionStatusResult) error {
+	lines := []string{
+		"cc-engine session status",
+		fmt.Sprintf("session: %s", result.Session),
+		fmt.Sprintf("mode: %s", result.Summary.Mode),
+		fmt.Sprintf("status: %s", result.Summary.Status),
+		fmt.Sprintf("profile: %s", result.Summary.ProfileID),
+		fmt.Sprintf("model: %s", result.Summary.Model),
+		fmt.Sprintf("turns: %d", result.Summary.TurnCount),
+		fmt.Sprintf("events: %d", result.Summary.EventCount),
+		fmt.Sprintf("last_event: %s", result.Summary.LastEventKind),
+		fmt.Sprintf("terminal_outcome: %s", result.Summary.TerminalOutcome),
+	}
+	if result.Summary.ClosedReason != "" {
+		lines = append(lines, fmt.Sprintf("closed_reason: %s", result.Summary.ClosedReason))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
