@@ -162,6 +162,13 @@ async function runInteractiveLoop(
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
           await ui.waitForDecision(decisionVersion);
+          if (slashCommand.key === "profile_id") {
+            config.profileId = slashCommand.value;
+            const catalog = await listModels(config, slashCommand.value);
+            config.model = catalog.default_model;
+          } else {
+            config.model = slashCommand.value;
+          }
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -172,8 +179,16 @@ async function runInteractiveLoop(
           continue;
         }
         if (slashCommand?.kind === "models") {
-          const catalog = await listModels(config, slashCommand.profileId);
-          renderModelCatalog(ui, catalog);
+          const catalog = await listModels(
+            config,
+            slashCommand.profileId || config.profileId,
+          );
+          renderModelCatalog(
+            ui,
+            catalog,
+            config.profileId,
+            config.model,
+          );
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -195,6 +210,8 @@ async function runInteractiveLoop(
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "openrouter-main"));
           await ui.waitForDecision(decisionVersion);
+          config.profileId = "openrouter-main";
+          config.model = slashCommand.defaultModel || (await listModels(config, "openrouter-main")).default_model;
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -209,6 +226,8 @@ async function runInteractiveLoop(
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-api"));
           await ui.waitForDecision(decisionVersion);
+          config.profileId = "anthropic-api";
+          config.model = slashCommand.defaultModel || (await listModels(config, "anthropic-api")).default_model;
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -224,6 +243,8 @@ async function runInteractiveLoop(
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-main"));
           await ui.waitForDecision(decisionVersion);
+          config.profileId = "anthropic-main";
+          config.model = slashCommand.defaultModel || (await listModels(config, "anthropic-main")).default_model;
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -349,6 +370,9 @@ function createRenderer(rawEvents: boolean) {
     },
     decisionVersion(): number {
       return decisionSignals;
+    },
+    currentState(): SessionStateSnapshot | null {
+      return currentState;
     },
     waitForDecision(afterVersion: number): Promise<void> {
       if (decisionSignals > afterVersion) {
@@ -613,12 +637,20 @@ function renderProfiles(
 function renderModelCatalog(
   ui: ReturnType<typeof createRenderer>,
   catalog: Awaited<ReturnType<typeof listModels>>,
+  activeProfileID: string,
+  activeModel: string,
 ): void {
   ui.writeLine("models:");
   ui.writeLine(`- profile: ${catalog.profile_id}`);
   ui.writeLine(`  default_model: ${catalog.default_model}`);
   if (catalog.models.length > 0) {
-    ui.writeLine(`  available: ${catalog.models.join(", ")}`);
+    const currentModel = activeProfileID === catalog.profile_id
+      ? activeModel
+      : "";
+    const formattedModels = catalog.models.map((model) =>
+      model === currentModel ? `${model} (current)` : model,
+    );
+    ui.writeLine(`  available: ${formattedModels.join(", ")}`);
   }
   const capabilities = formatCapabilities(catalog.capabilities);
   if (capabilities !== "") {
@@ -657,6 +689,7 @@ function formatCapabilities(capabilities: ProfileStatus["capabilities"]): string
   }
   return enabled.join(", ");
 }
+
 
 function printHelp(): void {
   const help = [
