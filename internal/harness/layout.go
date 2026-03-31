@@ -9,6 +9,7 @@ const (
 	DirIndexes             = "indexes"
 	DirReports             = "reports"
 	RunMetadataFile        = "run.json"
+	RunIndexFile           = "runs.jsonl"
 )
 
 var artifactDirs = []string{
