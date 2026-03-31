@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/provider"
 	"github.com/cdossman/klaude-kode/internal/toolruntime"
@@ -938,6 +939,11 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 	if model == "" {
 		model = profile.DefaultModel
 	}
+
+	preflightProfile, err := e.maybeRefreshOAuthProfileLocked(context.Background(), profile, false)
+	if err == nil {
+		profile = preflightProfile
+	}
 	if err := e.providers.ValidateModel(context.Background(), profile, model); err != nil {
 		category, code, outcome, retryable, assistantMessage := classifyProviderFailure(err)
 		if emitErr := e.emitFailureDetailedLocked(record, turnID, commandID, category, code, err, outcome, retryable); emitErr != nil {
@@ -959,6 +965,28 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 			},
 		},
 	})
+	if shouldRetryOAuthCompletion(err, profile) {
+		refreshedProfile, refreshErr := e.maybeRefreshOAuthProfileLocked(context.Background(), profile, true)
+		if refreshErr == nil {
+			profile = refreshedProfile
+			completion, err = e.providers.Complete(context.Background(), profile, contracts.CompletionRequest{
+				TurnID: turnID,
+				Model:  model,
+				Messages: []contracts.CanonicalMessage{
+					{
+						Role:    "user",
+						Content: userText,
+					},
+				},
+			})
+		} else {
+			err = &provider.Error{
+				Code:      provider.ErrorCodeAuthFailed,
+				Message:   fmt.Sprintf("oauth refresh failed: %v", refreshErr),
+				Retryable: false,
+			}
+		}
+	}
 	if err != nil {
 		category, code, outcome, retryable, assistantMessage := classifyProviderFailure(err)
 		if emitErr := e.emitFailureDetailedLocked(record, turnID, commandID, category, code, err, outcome, retryable); emitErr != nil {
@@ -979,6 +1007,14 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 		Outcome:          contracts.TerminalOutcomeSuccess,
 		AssistantMessage: message,
 	}, nil
+}
+
+func shouldRetryOAuthCompletion(err error, profile contracts.AuthProfile) bool {
+	if err == nil || profile.Kind != contracts.AuthProfileAnthropicOAuth {
+		return false
+	}
+	providerErr := provider.AsError(err)
+	return providerErr != nil && providerErr.Code == provider.ErrorCodeAuthFailed
 }
 
 func (e *InMemoryEngine) resolvePendingPermissionLocked(record *sessionRecord, cmd contracts.SessionCommand, allow bool) (turnResult, error) {
@@ -1202,6 +1238,22 @@ func (e *InMemoryEngine) resolveProfile(profileID string, model string) (contrac
 		return e.profileStore.ResolveProfile(profileID, model)
 	}
 	return provider.ResolveSessionProfile(profileID, model), nil
+}
+
+func (e *InMemoryEngine) maybeRefreshOAuthProfileLocked(ctx context.Context, profile contracts.AuthProfile, force bool) (contracts.AuthProfile, error) {
+	refreshed, changed, err := anthropicoauth.MaybeRefreshProfile(ctx, profile, force)
+	if err != nil {
+		return profile, err
+	}
+	if !changed {
+		return profile, nil
+	}
+	if e.profileStore != nil {
+		if err := e.profileStore.SaveProfile(refreshed); err != nil {
+			return profile, err
+		}
+	}
+	return refreshed, nil
 }
 
 func (e *InMemoryEngine) buildProfileStatus(ctx context.Context, profile contracts.AuthProfile) (contracts.ProfileStatus, error) {

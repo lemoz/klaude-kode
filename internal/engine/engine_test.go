@@ -2,11 +2,15 @@ package engine
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
+	"github.com/cdossman/klaude-kode/internal/provider"
 )
 
 func TestStartSessionRecordsAuthoritativeEventLog(t *testing.T) {
@@ -500,6 +504,184 @@ func TestMissingEnvCredentialProducesAuthFailure(t *testing.T) {
 	}
 	if events[6].Kind != contracts.EventKindLifecycle || events[6].Payload.TerminalOutcome != contracts.TerminalOutcomeProviderFailure {
 		t.Fatalf("expected provider_failure outcome, got %s (%s)", events[6].Kind, events[6].Payload.TerminalOutcome)
+	}
+}
+
+func TestAnthropicOAuthExpiredTokenRefreshesAndPersists(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	var sawBearer string
+	var refreshCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/oauth/token":
+			refreshCalls++
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"refreshed-access","refresh_token":"refreshed-refresh","expires_in":7200,"scope":"user:profile user:inference"}`))
+		case "/v1/messages":
+			sawBearer = r.Header.Get("authorization")
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"oauth refreshed reply"}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runtime, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+
+	if _, err := runtime.SaveProfile(ctx, contracts.AuthProfile{
+		ID:           "anthropic-main",
+		Kind:         contracts.AuthProfileAnthropicOAuth,
+		Provider:     contracts.ProviderAnthropic,
+		DisplayName:  "Anthropic Main",
+		DefaultModel: "claude-sonnet-4-6",
+		Settings: map[string]string{
+			"oauth_access_token":  "expired-access",
+			"oauth_refresh_token": "refresh-token",
+			"oauth_expires_at":    strconv.FormatInt(time.Now().UTC().Add(-time.Minute).Unix(), 10),
+			"oauth_scopes":        "user:profile user:inference",
+			"oauth_token_url":     server.URL + "/v1/oauth/token",
+			"oauth_client_id":     "client-123",
+			"oauth_host":          "https://claude.ai",
+			"account_scope":       "claude",
+			"api_base":            server.URL,
+		},
+	}, true); err != nil {
+		t.Fatalf("SaveProfile returned error: %v", err)
+	}
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_oauth_refresh",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello oauth refresh",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	if refreshCalls != 1 {
+		t.Fatalf("expected one refresh call, got %d", refreshCalls)
+	}
+	if sawBearer != "Bearer refreshed-access" {
+		t.Fatalf("expected refreshed bearer token on message request, got %q", sawBearer)
+	}
+
+	store, err := provider.NewFileProfileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileProfileStore returned error: %v", err)
+	}
+	profile, err := store.GetProfile("anthropic-main")
+	if err != nil {
+		t.Fatalf("GetProfile returned error: %v", err)
+	}
+	if profile.Settings["oauth_access_token"] != "refreshed-access" {
+		t.Fatalf("expected persisted refreshed access token, got %q", profile.Settings["oauth_access_token"])
+	}
+}
+
+func TestAnthropicOAuthAuthFailureRefreshesAndRetriesOnce(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	var refreshCalls int
+	var messageCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/oauth/token":
+			refreshCalls++
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"second-access","refresh_token":"second-refresh","expires_in":7200,"scope":"user:profile user:inference"}`))
+		case "/v1/messages":
+			messageCalls++
+			if messageCalls == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"oauth token expired"}}`))
+				return
+			}
+			if got := r.Header.Get("authorization"); got != "Bearer second-access" {
+				t.Fatalf("expected retried request to use refreshed token, got %q", got)
+			}
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"oauth retry reply"}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	runtime, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+
+	if _, err := runtime.SaveProfile(ctx, contracts.AuthProfile{
+		ID:           "anthropic-main",
+		Kind:         contracts.AuthProfileAnthropicOAuth,
+		Provider:     contracts.ProviderAnthropic,
+		DisplayName:  "Anthropic Main",
+		DefaultModel: "claude-sonnet-4-6",
+		Settings: map[string]string{
+			"oauth_access_token":  "first-access",
+			"oauth_refresh_token": "refresh-token",
+			"oauth_expires_at":    strconv.FormatInt(time.Now().UTC().Add(30*time.Minute).Unix(), 10),
+			"oauth_scopes":        "user:profile user:inference",
+			"oauth_token_url":     server.URL + "/v1/oauth/token",
+			"oauth_client_id":     "client-123",
+			"oauth_host":          "https://claude.ai",
+			"account_scope":       "claude",
+			"api_base":            server.URL,
+		},
+	}, true); err != nil {
+		t.Fatalf("SaveProfile returned error: %v", err)
+	}
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_oauth_retry",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello oauth retry",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	if refreshCalls != 1 {
+		t.Fatalf("expected one refresh call after auth failure, got %d", refreshCalls)
+	}
+	if messageCalls != 2 {
+		t.Fatalf("expected two message attempts, got %d", messageCalls)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if events[4].Payload.Message == nil || !strings.Contains(events[4].Payload.Message.Content, "oauth retry reply") {
+		t.Fatalf("expected assistant message after oauth retry, got %#v", events[4].Payload.Message)
 	}
 }
 
