@@ -93,17 +93,32 @@ func TestStreamEventsReplaysBacklogAndFutureEvents(t *testing.T) {
 
 	third := nextEvent(t, stream)
 	fourth := nextEvent(t, stream)
+	fifth := nextEvent(t, stream)
+	sixth := nextEvent(t, stream)
+	seventh := nextEvent(t, stream)
 	if third.Kind != contracts.EventKindUserMessageAccepted {
 		t.Fatalf("expected user_message_accepted, got %s", third.Kind)
 	}
-	if fourth.Kind != contracts.EventKindSessionState {
-		t.Fatalf("expected session_state after user input, got %s", fourth.Kind)
+	if fourth.Kind != contracts.EventKindLifecycle || fourth.Payload.LifecycleName != "turn_started" {
+		t.Fatalf("expected lifecycle turn_started, got %s (%s)", fourth.Kind, fourth.Payload.LifecycleName)
 	}
 	if third.Payload.Message == nil || third.Payload.Message.Content != "hello" {
 		t.Fatalf("unexpected message payload: %#v", third.Payload.Message)
 	}
-	if fourth.Payload.State == nil || fourth.Payload.State.TurnCount != 1 {
-		t.Fatalf("expected turn count 1 in state snapshot, got %#v", fourth.Payload.State)
+	if fifth.Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message, got %s", fifth.Kind)
+	}
+	if sixth.Kind != contracts.EventKindLifecycle || sixth.Payload.LifecycleName != "turn_completed" {
+		t.Fatalf("expected lifecycle turn_completed, got %s (%s)", sixth.Kind, sixth.Payload.LifecycleName)
+	}
+	if sixth.Payload.TerminalOutcome != contracts.TerminalOutcomeSuccess {
+		t.Fatalf("expected success terminal outcome, got %s", sixth.Payload.TerminalOutcome)
+	}
+	if seventh.Kind != contracts.EventKindSessionState {
+		t.Fatalf("expected session_state after turn completion, got %s", seventh.Kind)
+	}
+	if seventh.Payload.State == nil || seventh.Payload.State.TurnCount != 1 {
+		t.Fatalf("expected turn count 1 in state snapshot, got %#v", seventh.Payload.State)
 	}
 }
 

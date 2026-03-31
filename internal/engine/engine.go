@@ -293,6 +293,37 @@ func (e *InMemoryEngine) handleUserInputLocked(record *sessionRecord, cmd contra
 		return err
 	}
 
+	if _, err := e.appendEventLocked(record, contracts.EventKindLifecycle, contracts.SessionEventPayload{
+		CommandID:     cmd.CommandID,
+		TurnID:        turnID,
+		LifecycleName: "turn_started",
+	}); err != nil {
+		return err
+	}
+
+	if _, err := e.appendEventLocked(record, contracts.EventKindAssistantMessage, contracts.SessionEventPayload{
+		CommandID: cmd.CommandID,
+		TurnID:    turnID,
+		Message: &contracts.CanonicalMessage{
+			Role:    "assistant",
+			Content: scaffoldAssistantReply(record.handle.Model, text),
+		},
+	}); err != nil {
+		return err
+	}
+
+	previousOutcome := record.summary.TerminalOutcome
+	record.summary.TerminalOutcome = contracts.TerminalOutcomeSuccess
+	if _, err := e.appendEventLocked(record, contracts.EventKindLifecycle, contracts.SessionEventPayload{
+		CommandID:       cmd.CommandID,
+		TurnID:          turnID,
+		LifecycleName:   "turn_completed",
+		TerminalOutcome: contracts.TerminalOutcomeSuccess,
+	}); err != nil {
+		record.summary.TerminalOutcome = previousOutcome
+		return err
+	}
+
 	record.summary.TurnCount++
 	if _, err := e.appendEventLocked(record, contracts.EventKindSessionState, contracts.SessionEventPayload{
 		CommandID: cmd.CommandID,
@@ -300,6 +331,7 @@ func (e *InMemoryEngine) handleUserInputLocked(record *sessionRecord, cmd contra
 		State:     e.nextStateSnapshotLocked(record),
 	}); err != nil {
 		record.summary.TurnCount--
+		record.summary.TerminalOutcome = previousOutcome
 		return err
 	}
 	return nil
@@ -526,4 +558,15 @@ func normalizeCommand(cmd contracts.SessionCommand) contracts.SessionCommand {
 		cmd.Timestamp = time.Now().UTC()
 	}
 	return cmd
+}
+
+func scaffoldAssistantReply(model string, userText string) string {
+	if strings.TrimSpace(model) == "" {
+		model = "default-model"
+	}
+	return fmt.Sprintf(
+		"Scaffold response from %s. Provider execution is not wired yet. Received: %s",
+		model,
+		userText,
+	)
 }

@@ -56,6 +56,7 @@ const (
 	EventKindSessionStarted      EventKind = "session_started"
 	EventKindLifecycle           EventKind = "lifecycle"
 	EventKindUserMessageAccepted EventKind = "user_message_accepted"
+	EventKindAssistantMessage    EventKind = "assistant_message"
 	EventKindSessionState        EventKind = "session_state"
 	EventKindWarning             EventKind = "warning"
 	EventKindFailure             EventKind = "failure"
@@ -185,14 +186,16 @@ type SessionEvent struct {
 }
 
 type SessionEventPayload struct {
-	CommandID string                `json:"command_id"`
-	TurnID    string                `json:"turn_id"`
-	Source    MessageSource         `json:"source"`
-	Message   *CanonicalMessage     `json:"message"`
-	State     *SessionStateSnapshot `json:"state"`
-	Warning   string                `json:"warning"`
-	Failure   *FailurePayload       `json:"failure"`
-	Reason    string                `json:"reason"`
+	CommandID       string                `json:"command_id"`
+	TurnID          string                `json:"turn_id"`
+	Source          MessageSource         `json:"source"`
+	Message         *CanonicalMessage     `json:"message"`
+	State           *SessionStateSnapshot `json:"state"`
+	LifecycleName   string                `json:"lifecycle_name"`
+	TerminalOutcome TerminalOutcome       `json:"terminal_outcome"`
+	Warning         string                `json:"warning"`
+	Failure         *FailurePayload       `json:"failure"`
+	Reason          string                `json:"reason"`
 }
 
 type FailurePayload struct {
