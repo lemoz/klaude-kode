@@ -141,6 +141,23 @@ export interface CandidateValidationResult {
   candidate: CandidateBundle;
 }
 
+export interface EvalFailureSummary {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface EvalRun {
+  id: string;
+  schema_version: string;
+  created_at: string;
+  candidate: CandidateBundle;
+  replay_path: string;
+  status: string;
+  score: number;
+  failure: EvalFailureSummary | null;
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -384,6 +401,20 @@ export async function validateCandidate(
     `-state-root=${config.stateRoot}`,
   ]);
   return JSON.parse(stdout) as CandidateValidationResult;
+}
+
+export async function runReplayEval(
+  config: Pick<ShellConfig, "stateRoot" | "cwd">,
+  replayPath: string,
+): Promise<EvalRun> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    "-run-replay-eval",
+    `-cwd=${config.cwd}`,
+    `-replay-path=${replayPath}`,
+    `-state-root=${config.stateRoot}`,
+  ]);
+  return JSON.parse(stdout) as EvalRun;
 }
 
 export async function logoutProfile(

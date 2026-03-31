@@ -16,9 +16,11 @@ import {
   loginOpenRouter,
   makeUpdateSessionSettingCommand,
   makeUserInputCommand,
+  runReplayEval,
   startEngineSession,
   validateCandidate,
   type CandidateValidationResult,
+  type EvalRun,
   type PermissionEventPayload,
   type ProfileStatus,
   exportReplayPack,
@@ -191,6 +193,13 @@ async function runInteractiveLoop(
         if (slashCommand?.kind === "validate_candidate") {
           const validation = await validateCandidate(config);
           renderCandidateValidation(ui, validation);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "run_replay") {
+          const replayPath = path.resolve(config.cwd, slashCommand.replayPath);
+          const evalRun = await runReplayEval(config, replayPath);
+          renderReplayEval(ui, evalRun);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -497,6 +506,7 @@ function parseSlashCommand(
   | { kind: "profiles" }
   | { kind: "status" }
   | { kind: "validate_candidate" }
+  | { kind: "run_replay"; replayPath: string }
   | { kind: "export_replay"; outputPath: string }
   | { kind: "models"; profileId?: string }
   | { kind: "logout"; profileId: string }
@@ -517,6 +527,13 @@ function parseSlashCommand(
   }
   if (trimmed === "/validate-candidate") {
     return { kind: "validate_candidate" };
+  }
+  if (trimmed.startsWith("/run-replay ")) {
+    const replayPath = trimmed.slice("/run-replay ".length).trim();
+    if (replayPath === "") {
+      throw new Error("usage: /run-replay <path>");
+    }
+    return { kind: "run_replay", replayPath };
   }
   if (trimmed.startsWith("/export-replay ")) {
     const outputPath = trimmed.slice("/export-replay ".length).trim();
@@ -741,6 +758,23 @@ function renderCandidateValidation(
   }
 }
 
+function renderReplayEval(
+  ui: ReturnType<typeof createRenderer>,
+  evalRun: EvalRun,
+): void {
+  ui.writeLine("replay:");
+  ui.writeLine(`- run: ${evalRun.id}`);
+  ui.writeLine(`  status: ${evalRun.status}`);
+  ui.writeLine(`  score: ${evalRun.score.toFixed(2)}`);
+  ui.writeLine(`  candidate_root: ${evalRun.candidate.root}`);
+  ui.writeLine(`  replay_path: ${evalRun.replay_path}`);
+  if (evalRun.failure) {
+    ui.writeLine(`  failure_code: ${evalRun.failure.code}`);
+    ui.writeLine(`  failure_message: ${evalRun.failure.message}`);
+    ui.writeLine(`  retryable: ${evalRun.failure.retryable}`);
+  }
+}
+
 function formatCapabilities(capabilities: ProfileStatus["capabilities"]): string {
   const enabled: string[] = [];
   if (capabilities.streaming) {
@@ -792,6 +826,7 @@ function printHelp(): void {
     "  /profiles",
     "  /status",
     "  /validate-candidate",
+    "  /run-replay <path>",
     "  /export-replay <path>",
     "  /models [profile-id]",
     "  /logout [anthropic|openrouter]",
