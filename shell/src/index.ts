@@ -174,7 +174,7 @@ async function runInteractiveLoop(
         }
         if (slashCommand?.kind === "profiles") {
           const profiles = await listProfiles(config);
-          renderProfiles(ui, profiles);
+          renderProfiles(ui, profiles, config.profileId);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -195,7 +195,7 @@ async function runInteractiveLoop(
         if (slashCommand?.kind === "logout") {
           const profiles = await logoutProfile(config, slashCommand.profileId);
           ui.writeLine(`logout: cleared stored auth for ${slashCommand.profileId}`);
-          renderProfiles(ui, profiles);
+          renderProfiles(ui, profiles, config.profileId);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -206,7 +206,7 @@ async function runInteractiveLoop(
             apiBase: slashCommand.apiBase,
           });
           ui.writeLine("login: saved openrouter-main and set it as default");
-          renderProfiles(ui, profiles);
+          renderProfiles(ui, profiles, "openrouter-main");
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "openrouter-main"));
           await ui.waitForDecision(decisionVersion);
@@ -222,7 +222,7 @@ async function runInteractiveLoop(
             apiBase: slashCommand.apiBase,
           });
           ui.writeLine("login: saved anthropic-api and set it as default");
-          renderProfiles(ui, profiles);
+          renderProfiles(ui, profiles, "anthropic-api");
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-api"));
           await ui.waitForDecision(decisionVersion);
@@ -239,7 +239,7 @@ async function runInteractiveLoop(
             accountScope: slashCommand.accountScope,
           });
           ui.writeLine("login: saved anthropic-main and set it as default");
-          renderProfiles(ui, profiles);
+          renderProfiles(ui, profiles, "anthropic-main");
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-main"));
           await ui.waitForDecision(decisionVersion);
@@ -609,11 +609,13 @@ function parseLoginCommand(
 function renderProfiles(
   ui: ReturnType<typeof createRenderer>,
   profiles: ProfileStatus[],
+  activeProfileID: string,
 ): void {
   ui.writeLine("profiles:");
   for (const entry of profiles) {
+    const currentMarker = entry.profile.id === activeProfileID ? " (current)" : "";
     ui.writeLine(
-      `- ${entry.profile.id} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid} auth=${entry.auth.state}`,
+      `- ${entry.profile.id}${currentMarker} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid} auth=${entry.auth.state}`,
     );
     if (entry.auth.expires_at !== "") {
       ui.writeLine(`  expires_at: ${entry.auth.expires_at}`);
