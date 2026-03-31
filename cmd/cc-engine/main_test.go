@@ -370,6 +370,50 @@ func TestRunSummarizeRunsJSON(t *testing.T) {
 	}
 }
 
+func TestRunShowRunJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	replayPath := writeReplayPack(t, t.TempDir(), contracts.TerminalOutcomeSuccess)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-format=json",
+		"-run-replay-eval",
+		"-cwd=" + candidateRoot,
+		"-replay-path=" + replayPath,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("replay eval run returned error: %v", err)
+	}
+
+	var created harness.EvalRun
+	if err := json.Unmarshal(stdout.Bytes(), &created); err != nil {
+		t.Fatalf("failed to parse created run output: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	if err := run([]string{
+		"-format=json",
+		"-show-run",
+		"-cwd=" + candidateRoot,
+		"-run-id=" + created.ID,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("show run returned error: %v", err)
+	}
+
+	var got harness.EvalRun
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse show run output: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Fatalf("expected run id %s, got %s", created.ID, got.ID)
+	}
+	if got.Status != harness.EvalRunStatusCompleted {
+		t.Fatalf("expected completed run, got %#v", got)
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

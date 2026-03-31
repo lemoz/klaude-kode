@@ -37,6 +37,7 @@ type config struct {
 	ValidateCandidate   bool
 	RunReplayEval       bool
 	SummarizeRuns       bool
+	ShowRun             bool
 	UpsertProfile       bool
 	AnthropicOAuthLogin bool
 	LogoutProfileID     string
@@ -58,6 +59,7 @@ type config struct {
 	MakeDefault         bool
 	StateRoot           string
 	ReplayPath          string
+	RunID               string
 }
 
 type result struct {
@@ -148,6 +150,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return renderRunSummary(cfg, stdout)
 	}
+	if cfg.ShowRun {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-show-run does not support -format=events")
+		}
+		return renderShowRun(cfg, stdout)
+	}
 	if cfg.RunReplayEval {
 		if cfg.Format == outputFormatEvents {
 			return fmt.Errorf("-run-replay-eval does not support -format=events")
@@ -207,6 +215,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
 	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
+	showRunValue := fs.Bool("show-run", false, "show a persisted replay evaluation run and exit")
 	runReplayEvalValue := fs.Bool("run-replay-eval", false, "run a replay evaluation for the current candidate root and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
@@ -229,6 +238,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	makeDefaultValue := fs.Bool("make-default", false, "set the upserted profile as the default profile")
 	stateRootValue := fs.String("state-root", engine.DefaultStateRoot(), "engine state root")
 	replayPathValue := fs.String("replay-path", "", "path to a replay pack file for harness evaluation")
+	runIDValue := fs.String("run-id", "", "run identifier for -show-run")
 
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -257,6 +267,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ExportReplayPack:    *exportReplayPackValue,
 		ValidateCandidate:   *validateCandidateValue,
 		SummarizeRuns:       *summarizeRunsValue,
+		ShowRun:             *showRunValue,
 		RunReplayEval:       *runReplayEvalValue,
 		UpsertProfile:       *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
@@ -279,6 +290,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		MakeDefault:         *makeDefaultValue,
 		StateRoot:           strings.TrimSpace(*stateRootValue),
 		ReplayPath:          strings.TrimSpace(*replayPathValue),
+		RunID:               strings.TrimSpace(*runIDValue),
 	}, nil
 }
 
@@ -664,6 +676,28 @@ func renderRunSummary(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderShowRun(cfg config, stdout io.Writer) error {
+	if cfg.RunID == "" {
+		return fmt.Errorf("a run id is required for -show-run")
+	}
+
+	run, err := harness.LoadEvalRun(harness.DefaultArtifactRoot(cfg.CWD), cfg.RunID)
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderShowRunText(stdout, run)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(run)
+	}
+}
+
 func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
 	profile, err := buildProfileFromConfig(cfg)
 	if err != nil {
@@ -876,6 +910,24 @@ func renderRunSummaryText(stdout io.Writer, summary harness.EvalRunSummary) erro
 			parts = append(parts, fmt.Sprintf("%s=%d", code, summary.FailureCodes[code]))
 		}
 		lines = append(lines, fmt.Sprintf("failure_codes: %s", strings.Join(parts, ", ")))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderShowRunText(stdout io.Writer, run harness.EvalRun) error {
+	lines := []string{
+		"cc-engine replay run",
+		fmt.Sprintf("run: %s", run.ID),
+		fmt.Sprintf("candidate_root: %s", run.Candidate.Root),
+		fmt.Sprintf("replay_path: %s", run.ReplayPath),
+		fmt.Sprintf("status: %s", run.Status),
+		fmt.Sprintf("score: %.2f", run.Score),
+	}
+	if run.Failure != nil {
+		lines = append(lines, fmt.Sprintf("failure_code: %s", run.Failure.Code))
+		lines = append(lines, fmt.Sprintf("failure_message: %s", run.Failure.Message))
+		lines = append(lines, fmt.Sprintf("retryable: %t", run.Failure.Retryable))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
