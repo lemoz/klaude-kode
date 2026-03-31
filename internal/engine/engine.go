@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
+	"github.com/cdossman/klaude-kode/internal/provider"
 	"github.com/cdossman/klaude-kode/internal/toolruntime"
 )
 
@@ -29,6 +30,7 @@ type InMemoryEngine struct {
 	nextSubscriberID uint64
 	store            sessionStore
 	toolRuntime      toolruntime.Runtime
+	providers        *provider.Registry
 }
 
 type sessionRecord struct {
@@ -72,6 +74,7 @@ func NewInMemoryEngine() *InMemoryEngine {
 	return &InMemoryEngine{
 		sessions:    make(map[string]*sessionRecord),
 		toolRuntime: toolruntime.NewBuiltinRuntime(),
+		providers:   provider.DefaultRegistry(),
 	}
 }
 
@@ -84,6 +87,7 @@ func NewFileBackedEngine(root string) (*InMemoryEngine, error) {
 		sessions:    make(map[string]*sessionRecord),
 		store:       store,
 		toolRuntime: toolruntime.NewBuiltinRuntime(),
+		providers:   provider.DefaultRegistry(),
 	}, nil
 }
 
@@ -753,10 +757,7 @@ func scaffoldAssistantReply(model string, userText string) string {
 func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, commandID string, userText string, metadata map[string]string) (turnResult, error) {
 	call, isToolCall := toolruntime.ParseInlineToolCall(userText)
 	if !isToolCall {
-		return turnResult{
-			Outcome:          contracts.TerminalOutcomeSuccess,
-			AssistantMessage: scaffoldAssistantReply(record.handle.Model, userText),
-		}, nil
+		return e.executeProviderTurnLocked(record, turnID, commandID, userText)
 	}
 
 	call.ID = fmt.Sprintf("tool_%s_1", turnID)
@@ -827,6 +828,72 @@ func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, com
 	}
 
 	return e.executeToolCallLocked(record, turnID, commandID, call, descriptor)
+}
+
+func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID string, commandID string, userText string) (turnResult, error) {
+	if e.providers == nil {
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeSuccess,
+			AssistantMessage: scaffoldAssistantReply(record.handle.Model, userText),
+		}, nil
+	}
+
+	profile := provider.ResolveSessionProfile(record.handle.ProfileID, record.handle.Model)
+	validation, err := e.providers.ValidateProfile(context.Background(), profile)
+	if err != nil {
+		if emitErr := e.emitFailureLocked(record, turnID, commandID, contracts.FailureCategoryAuth, "profile_validation_failed", err, contracts.TerminalOutcomeProviderFailure); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeProviderFailure,
+			AssistantMessage: fmt.Sprintf("Provider setup failed: %v", err),
+		}, nil
+	}
+	if !validation.Valid {
+		err := fmt.Errorf(validation.Message)
+		if emitErr := e.emitFailureLocked(record, turnID, commandID, contracts.FailureCategoryAuth, "invalid_profile", err, contracts.TerminalOutcomeProviderFailure); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeProviderFailure,
+			AssistantMessage: fmt.Sprintf("Provider setup failed: %s", validation.Message),
+		}, nil
+	}
+
+	model := strings.TrimSpace(record.handle.Model)
+	if model == "" {
+		model = profile.DefaultModel
+	}
+
+	completion, err := e.providers.Complete(context.Background(), profile, contracts.CompletionRequest{
+		TurnID: turnID,
+		Model:  model,
+		Messages: []contracts.CanonicalMessage{
+			{
+				Role:    "user",
+				Content: userText,
+			},
+		},
+	})
+	if err != nil {
+		if emitErr := e.emitFailureLocked(record, turnID, commandID, contracts.FailureCategoryProvider, "provider_completion_failed", err, contracts.TerminalOutcomeProviderFailure); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          contracts.TerminalOutcomeProviderFailure,
+			AssistantMessage: fmt.Sprintf("Provider execution failed: %v", err),
+		}, nil
+	}
+
+	message := strings.TrimSpace(completion.Message.Content)
+	if message == "" {
+		message = scaffoldAssistantReply(model, userText)
+	}
+
+	return turnResult{
+		Outcome:          contracts.TerminalOutcomeSuccess,
+		AssistantMessage: message,
+	}, nil
 }
 
 func (e *InMemoryEngine) resolvePendingPermissionLocked(record *sessionRecord, cmd contracts.SessionCommand, allow bool) (turnResult, error) {

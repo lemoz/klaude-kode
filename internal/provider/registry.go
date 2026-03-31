@@ -74,3 +74,19 @@ func (r *Registry) Capabilities(ctx context.Context, profile contracts.AuthProfi
 	}
 	return adapter.Capabilities(ctx, profile, model)
 }
+
+func (r *Registry) Complete(ctx context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (contracts.CompletionResult, error) {
+	adapter, err := r.Get(profile.Provider)
+	if err != nil {
+		return contracts.CompletionResult{}, err
+	}
+	return adapter.Complete(ctx, profile, req)
+}
+
+func (r *Registry) StreamCompletion(ctx context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (<-chan contracts.ProviderEvent, error) {
+	adapter, err := r.Get(profile.Provider)
+	if err != nil {
+		return nil, err
+	}
+	return adapter.StreamCompletion(ctx, profile, req)
+}

@@ -98,11 +98,41 @@ func (a *staticAdapter) StreamCompletion(_ context.Context, profile contracts.Au
 	return nil, ErrCompletionNotImplemented
 }
 
-func (a *staticAdapter) Complete(_ context.Context, profile contracts.AuthProfile, _ contracts.CompletionRequest) (contracts.CompletionResult, error) {
+func (a *staticAdapter) Complete(_ context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (contracts.CompletionResult, error) {
 	if err := a.ensureProfile(profile); err != nil {
 		return contracts.CompletionResult{}, err
 	}
-	return contracts.CompletionResult{}, ErrCompletionNotImplemented
+
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = strings.TrimSpace(profile.DefaultModel)
+	}
+	if model == "" && len(a.models) > 0 {
+		model = a.models[0]
+	}
+
+	lastUserText := ""
+	for index := len(req.Messages) - 1; index >= 0; index-- {
+		if strings.EqualFold(req.Messages[index].Role, "user") {
+			lastUserText = strings.TrimSpace(req.Messages[index].Content)
+			break
+		}
+	}
+	if lastUserText == "" {
+		lastUserText = "no user message provided"
+	}
+
+	return contracts.CompletionResult{
+		Message: contracts.CanonicalMessage{
+			Role: "assistant",
+			Content: fmt.Sprintf(
+				"%s response from %s. Received: %s",
+				a.responsePrefix(),
+				model,
+				lastUserText,
+			),
+		},
+	}, nil
 }
 
 func (a *staticAdapter) ValidateProfile(_ context.Context, profile contracts.AuthProfile) (contracts.ProfileValidationResult, error) {
@@ -163,4 +193,15 @@ func hasCredential(profile contracts.AuthProfile) bool {
 		}
 	}
 	return false
+}
+
+func (a *staticAdapter) responsePrefix() string {
+	switch a.kind {
+	case contracts.ProviderOpenRouter:
+		return "OpenRouter"
+	case contracts.ProviderAnthropic:
+		fallthrough
+	default:
+		return "Anthropic"
+	}
 }

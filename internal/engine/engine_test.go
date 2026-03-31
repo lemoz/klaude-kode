@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,9 @@ func TestStreamEventsReplaysBacklogAndFutureEvents(t *testing.T) {
 	if fifth.Kind != contracts.EventKindAssistantMessage {
 		t.Fatalf("expected assistant_message, got %s", fifth.Kind)
 	}
+	if fifth.Payload.Message == nil || !strings.Contains(fifth.Payload.Message.Content, "Anthropic response from") {
+		t.Fatalf("expected provider-backed assistant message, got %#v", fifth.Payload.Message)
+	}
 	if sixth.Kind != contracts.EventKindLifecycle || sixth.Payload.LifecycleName != "turn_completed" {
 		t.Fatalf("expected lifecycle turn_completed, got %s (%s)", sixth.Kind, sixth.Payload.LifecycleName)
 	}
@@ -119,6 +123,39 @@ func TestStreamEventsReplaysBacklogAndFutureEvents(t *testing.T) {
 	}
 	if seventh.Payload.State == nil || seventh.Payload.State.TurnCount != 1 {
 		t.Fatalf("expected turn count 1 in state snapshot, got %#v", seventh.Payload.State)
+	}
+}
+
+func TestNonToolTurnRoutesThroughOpenRouterWhenModelRequiresIt(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_openrouter",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		Model:     "openrouter/auto",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello from openrouter turn",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if events[4].Payload.Message == nil || !strings.Contains(events[4].Payload.Message.Content, "OpenRouter response from openrouter/auto") {
+		t.Fatalf("expected openrouter-backed assistant message, got %#v", events[4].Payload.Message)
 	}
 }
 
