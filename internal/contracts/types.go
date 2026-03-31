@@ -56,6 +56,7 @@ const (
 	EventKindSessionStarted      EventKind = "session_started"
 	EventKindLifecycle           EventKind = "lifecycle"
 	EventKindUserMessageAccepted EventKind = "user_message_accepted"
+	EventKindAssistantDelta      EventKind = "assistant_delta"
 	EventKindAssistantMessage    EventKind = "assistant_message"
 	EventKindToolCallRequested   EventKind = "tool_call_requested"
 	EventKindToolCallProgress    EventKind = "tool_call_progress"
@@ -294,11 +295,11 @@ type ProfileValidationResult struct {
 type ProfileAuthState string
 
 const (
-	ProfileAuthStateConfigured     ProfileAuthState = "configured"
-	ProfileAuthStateAuthenticated  ProfileAuthState = "authenticated"
-	ProfileAuthStateExpiring       ProfileAuthState = "expiring"
-	ProfileAuthStateExpired        ProfileAuthState = "expired"
-	ProfileAuthStateLoggedOut      ProfileAuthState = "logged_out"
+	ProfileAuthStateConfigured    ProfileAuthState = "configured"
+	ProfileAuthStateAuthenticated ProfileAuthState = "authenticated"
+	ProfileAuthStateExpiring      ProfileAuthState = "expiring"
+	ProfileAuthStateExpired       ProfileAuthState = "expired"
+	ProfileAuthStateLoggedOut     ProfileAuthState = "logged_out"
 )
 
 type ProfileAuthStatus struct {

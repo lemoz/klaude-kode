@@ -42,14 +42,17 @@ func TestRunJSONFormat(t *testing.T) {
 	if got.Summary.Status != contracts.SessionStatusClosed {
 		t.Fatalf("expected closed status, got %s", got.Summary.Status)
 	}
-	if len(got.Events) != 9 {
-		t.Fatalf("expected 9 events after headless close, got %d", len(got.Events))
+	if len(got.Events) != 10 {
+		t.Fatalf("expected 10 events after headless close, got %d", len(got.Events))
 	}
 	if got.Events[len(got.Events)-1].Kind != contracts.EventKindSessionClosed {
 		t.Fatalf("expected final event session_closed, got %s", got.Events[len(got.Events)-1].Kind)
 	}
-	if got.Events[4].Kind != contracts.EventKindAssistantMessage {
-		t.Fatalf("expected assistant_message in event stream, got %s", got.Events[4].Kind)
+	if got.Events[4].Kind != contracts.EventKindAssistantDelta {
+		t.Fatalf("expected assistant_delta in event stream, got %s", got.Events[4].Kind)
+	}
+	if got.Events[5].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message in event stream, got %s", got.Events[5].Kind)
 	}
 }
 
@@ -96,8 +99,8 @@ func TestRunEventsFormat(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 9 {
-		t.Fatalf("expected 9 jsonl events, got %d", len(lines))
+	if len(lines) != 10 {
+		t.Fatalf("expected 10 jsonl events, got %d", len(lines))
 	}
 
 	var last contracts.SessionEvent
@@ -211,11 +214,11 @@ func TestRunAnthropicOAuthLoginSavesDefaultProfile(t *testing.T) {
 				DisplayName:  opts.DisplayName,
 				DefaultModel: opts.DefaultModel,
 				Settings: map[string]string{
-					"oauth_host":         "https://claude.ai",
-					"account_scope":      "claude",
-					"oauth_access_token": "oauth-access",
+					"oauth_host":          "https://claude.ai",
+					"account_scope":       "claude",
+					"oauth_access_token":  "oauth-access",
 					"oauth_refresh_token": "oauth-refresh",
-					"api_base":           "https://api.anthropic.com",
+					"api_base":            "https://api.anthropic.com",
 				},
 			},
 		}, nil
@@ -359,8 +362,8 @@ func TestResumePersistedSession(t *testing.T) {
 	if got.Summary.Status != contracts.SessionStatusClosed {
 		t.Fatalf("expected resumed status closed, got %s", got.Summary.Status)
 	}
-	if len(got.Events) != 9 {
-		t.Fatalf("expected 9 replayed events, got %d", len(got.Events))
+	if len(got.Events) != 10 {
+		t.Fatalf("expected 10 replayed events, got %d", len(got.Events))
 	}
 }
 
@@ -425,8 +428,8 @@ func TestRunStdioTransportStreamsInteractiveSession(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 9 {
-		t.Fatalf("expected 9 stdio events, got %d", len(lines))
+	if len(lines) != 10 {
+		t.Fatalf("expected 10 stdio events, got %d", len(lines))
 	}
 
 	var got []contracts.SessionEvent
@@ -444,8 +447,11 @@ func TestRunStdioTransportStreamsInteractiveSession(t *testing.T) {
 	if got[2].Kind != contracts.EventKindUserMessageAccepted {
 		t.Fatalf("expected user_message_accepted, got %s", got[2].Kind)
 	}
-	if got[4].Kind != contracts.EventKindAssistantMessage {
-		t.Fatalf("expected assistant_message, got %s", got[4].Kind)
+	if got[4].Kind != contracts.EventKindAssistantDelta {
+		t.Fatalf("expected assistant_delta, got %s", got[4].Kind)
+	}
+	if got[5].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message, got %s", got[5].Kind)
 	}
 	if got[len(got)-1].Kind != contracts.EventKindSessionClosed {
 		t.Fatalf("expected final event session_closed, got %s", got[len(got)-1].Kind)

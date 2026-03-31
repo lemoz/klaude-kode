@@ -91,11 +91,31 @@ func (a *staticAdapter) CountTokens(_ context.Context, profile contracts.AuthPro
 	return contracts.TokenCountResult{InputTokens: total}, nil
 }
 
-func (a *staticAdapter) StreamCompletion(_ context.Context, profile contracts.AuthProfile, _ contracts.CompletionRequest) (<-chan contracts.ProviderEvent, error) {
+func (a *staticAdapter) StreamCompletion(ctx context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (<-chan contracts.ProviderEvent, error) {
 	if err := a.ensureProfile(profile); err != nil {
 		return nil, err
 	}
-	return nil, ErrCompletionNotImplemented
+
+	_, result, err := a.completeInternal(ctx, profile, req)
+	if err != nil {
+		return nil, err
+	}
+
+	stream := make(chan contracts.ProviderEvent, 1)
+	go func() {
+		defer close(stream)
+		text := strings.TrimSpace(result.Message.Content)
+		if text == "" {
+			return
+		}
+		stream <- contracts.ProviderEvent{
+			Kind: "assistant_delta",
+			Payload: map[string]any{
+				"text": text,
+			},
+		}
+	}()
+	return stream, nil
 }
 
 func (a *staticAdapter) Complete(ctx context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (contracts.CompletionResult, error) {
@@ -103,6 +123,14 @@ func (a *staticAdapter) Complete(ctx context.Context, profile contracts.AuthProf
 		return contracts.CompletionResult{}, err
 	}
 
+	_, result, err := a.completeInternal(ctx, profile, req)
+	if err != nil {
+		return contracts.CompletionResult{}, err
+	}
+	return result, nil
+}
+
+func (a *staticAdapter) completeInternal(ctx context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (string, contracts.CompletionResult, error) {
 	model := strings.TrimSpace(req.Model)
 	if model == "" {
 		model = strings.TrimSpace(profile.DefaultModel)
@@ -124,13 +152,13 @@ func (a *staticAdapter) Complete(ctx context.Context, profile contracts.AuthProf
 
 	liveResult, liveUsed, err := a.maybeCompleteLive(ctx, profile, req, model)
 	if err != nil {
-		return contracts.CompletionResult{}, err
+		return "", contracts.CompletionResult{}, err
 	}
 	if liveUsed {
-		return liveResult, nil
+		return model, liveResult, nil
 	}
 
-	return contracts.CompletionResult{
+	return model, contracts.CompletionResult{
 		Message: contracts.CanonicalMessage{
 			Role: "assistant",
 			Content: fmt.Sprintf(

@@ -121,8 +121,8 @@ func TestFileBackedEngineResumeAcrossInstances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
-	if len(events) != 9 {
-		t.Fatalf("expected 9 replay events, got %d", len(events))
+	if len(events) != 10 {
+		t.Fatalf("expected 10 replay events, got %d", len(events))
 	}
 
 	stream, err := runtimeB.StreamEvents(ctx, handle.SessionID)
@@ -134,8 +134,8 @@ func TestFileBackedEngineResumeAcrossInstances(t *testing.T) {
 	for range stream {
 		count++
 	}
-	if count != 9 {
-		t.Fatalf("expected resumed stream to replay 9 events, got %d", count)
+	if count != 10 {
+		t.Fatalf("expected resumed stream to replay 10 events, got %d", count)
 	}
 }
 

@@ -190,6 +190,7 @@ func TestStreamEventsReplaysBacklogAndFutureEvents(t *testing.T) {
 	fifth := nextEvent(t, stream)
 	sixth := nextEvent(t, stream)
 	seventh := nextEvent(t, stream)
+	eighth := nextEvent(t, stream)
 	if third.Kind != contracts.EventKindUserMessageAccepted {
 		t.Fatalf("expected user_message_accepted, got %s", third.Kind)
 	}
@@ -199,23 +200,26 @@ func TestStreamEventsReplaysBacklogAndFutureEvents(t *testing.T) {
 	if third.Payload.Message == nil || third.Payload.Message.Content != "hello" {
 		t.Fatalf("unexpected message payload: %#v", third.Payload.Message)
 	}
-	if fifth.Kind != contracts.EventKindAssistantMessage {
-		t.Fatalf("expected assistant_message, got %s", fifth.Kind)
+	if fifth.Kind != contracts.EventKindAssistantDelta {
+		t.Fatalf("expected assistant_delta, got %s", fifth.Kind)
 	}
 	if fifth.Payload.Message == nil || !strings.Contains(fifth.Payload.Message.Content, "Anthropic response from") {
-		t.Fatalf("expected provider-backed assistant message, got %#v", fifth.Payload.Message)
+		t.Fatalf("expected provider-backed assistant delta, got %#v", fifth.Payload.Message)
 	}
-	if sixth.Kind != contracts.EventKindLifecycle || sixth.Payload.LifecycleName != "turn_completed" {
-		t.Fatalf("expected lifecycle turn_completed, got %s (%s)", sixth.Kind, sixth.Payload.LifecycleName)
+	if sixth.Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message, got %s", sixth.Kind)
 	}
-	if sixth.Payload.TerminalOutcome != contracts.TerminalOutcomeSuccess {
-		t.Fatalf("expected success terminal outcome, got %s", sixth.Payload.TerminalOutcome)
+	if seventh.Kind != contracts.EventKindLifecycle || seventh.Payload.LifecycleName != "turn_completed" {
+		t.Fatalf("expected lifecycle turn_completed, got %s (%s)", seventh.Kind, seventh.Payload.LifecycleName)
 	}
-	if seventh.Kind != contracts.EventKindSessionState {
-		t.Fatalf("expected session_state after turn completion, got %s", seventh.Kind)
+	if seventh.Payload.TerminalOutcome != contracts.TerminalOutcomeSuccess {
+		t.Fatalf("expected success terminal outcome, got %s", seventh.Payload.TerminalOutcome)
 	}
-	if seventh.Payload.State == nil || seventh.Payload.State.TurnCount != 1 {
-		t.Fatalf("expected turn count 1 in state snapshot, got %#v", seventh.Payload.State)
+	if eighth.Kind != contracts.EventKindSessionState {
+		t.Fatalf("expected session_state after turn completion, got %s", eighth.Kind)
+	}
+	if eighth.Payload.State == nil || eighth.Payload.State.TurnCount != 1 {
+		t.Fatalf("expected turn count 1 in state snapshot, got %#v", eighth.Payload.State)
 	}
 }
 
@@ -247,8 +251,11 @@ func TestNonToolTurnRoutesThroughOpenRouterWhenModelRequiresIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
-	if events[4].Payload.Message == nil || !strings.Contains(events[4].Payload.Message.Content, "OpenRouter response from openrouter/auto") {
-		t.Fatalf("expected openrouter-backed assistant message, got %#v", events[4].Payload.Message)
+	if events[5].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message, got %s", events[5].Kind)
+	}
+	if events[5].Payload.Message == nil || !strings.Contains(events[5].Payload.Message.Content, "OpenRouter response from openrouter/auto") {
+		t.Fatalf("expected openrouter-backed assistant message, got %#v", events[5].Payload.Message)
 	}
 }
 
@@ -442,8 +449,11 @@ func TestOpenRouterCustomModelRemainsUsable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
-	if events[4].Payload.Message == nil || !strings.Contains(events[4].Payload.Message.Content, "OpenRouter response from my/custom-model") {
-		t.Fatalf("expected custom openrouter model response, got %#v", events[4].Payload.Message)
+	if events[5].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message, got %s", events[5].Kind)
+	}
+	if events[5].Payload.Message == nil || !strings.Contains(events[5].Payload.Message.Content, "OpenRouter response from my/custom-model") {
+		t.Fatalf("expected custom openrouter model response, got %#v", events[5].Payload.Message)
 	}
 }
 
@@ -683,8 +693,11 @@ func TestAnthropicOAuthAuthFailureRefreshesAndRetriesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
-	if events[4].Payload.Message == nil || !strings.Contains(events[4].Payload.Message.Content, "oauth retry reply") {
-		t.Fatalf("expected assistant message after oauth retry, got %#v", events[4].Payload.Message)
+	if events[5].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message, got %s", events[5].Kind)
+	}
+	if events[5].Payload.Message == nil || !strings.Contains(events[5].Payload.Message.Content, "oauth retry reply") {
+		t.Fatalf("expected assistant message after oauth retry, got %#v", events[5].Payload.Message)
 	}
 }
 

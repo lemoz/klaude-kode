@@ -73,6 +73,7 @@ type pendingPermissionState struct {
 type turnResult struct {
 	Pending          bool
 	Outcome          contracts.TerminalOutcome
+	AssistantDeltas  []string
 	AssistantMessage string
 }
 
@@ -420,7 +421,7 @@ func (e *InMemoryEngine) handleUserInputLocked(record *sessionRecord, cmd contra
 		return nil
 	}
 
-	if err := e.finishTurnLocked(record, cmd.CommandID, turnID, result.Outcome, result.AssistantMessage); err != nil {
+	if err := e.finishTurnLocked(record, cmd.CommandID, turnID, result.Outcome, result.AssistantDeltas, result.AssistantMessage); err != nil {
 		record.summary.TerminalOutcome = previousOutcome
 		return err
 	}
@@ -459,7 +460,7 @@ func (e *InMemoryEngine) handleSettingUpdateLocked(record *sessionRecord, cmd co
 	return nil
 }
 
-func (e *InMemoryEngine) finishTurnLocked(record *sessionRecord, commandID string, turnID string, outcome contracts.TerminalOutcome, assistantMessage string) error {
+func (e *InMemoryEngine) finishTurnLocked(record *sessionRecord, commandID string, turnID string, outcome contracts.TerminalOutcome, _ []string, assistantMessage string) error {
 	record.summary.TerminalOutcome = outcome
 
 	if _, err := e.appendEventLocked(record, contracts.EventKindAssistantMessage, contracts.SessionEventPayload{
@@ -514,7 +515,7 @@ func (e *InMemoryEngine) handlePermissionResolutionLocked(record *sessionRecord,
 		return err
 	}
 
-	if err := e.finishTurnLocked(record, cmd.CommandID, pending.TurnID, result.Outcome, result.AssistantMessage); err != nil {
+	if err := e.finishTurnLocked(record, cmd.CommandID, pending.TurnID, result.Outcome, result.AssistantDeltas, result.AssistantMessage); err != nil {
 		record.summary.TerminalOutcome = previousOutcome
 		return err
 	}
@@ -974,7 +975,7 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 		}, nil
 	}
 
-	completion, err := e.providers.Complete(context.Background(), profile, contracts.CompletionRequest{
+	completionRequest := contracts.CompletionRequest{
 		TurnID: turnID,
 		Model:  model,
 		Messages: []contracts.CanonicalMessage{
@@ -983,21 +984,14 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 				Content: userText,
 			},
 		},
-	})
+	}
+
+	assistantDeltas, completion, err := e.streamOrCompleteProviderTurn(record, turnID, commandID, profile, completionRequest)
 	if shouldRetryOAuthCompletion(err, profile) {
 		refreshedProfile, refreshErr := e.maybeRefreshOAuthProfileLocked(context.Background(), profile, true)
 		if refreshErr == nil {
 			profile = refreshedProfile
-			completion, err = e.providers.Complete(context.Background(), profile, contracts.CompletionRequest{
-				TurnID: turnID,
-				Model:  model,
-				Messages: []contracts.CanonicalMessage{
-					{
-						Role:    "user",
-						Content: userText,
-					},
-				},
-			})
+			assistantDeltas, completion, err = e.streamOrCompleteProviderTurn(record, turnID, commandID, profile, completionRequest)
 		} else {
 			err = &provider.Error{
 				Code:      provider.ErrorCodeAuthFailed,
@@ -1024,8 +1018,56 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 
 	return turnResult{
 		Outcome:          contracts.TerminalOutcomeSuccess,
+		AssistantDeltas:  assistantDeltas,
 		AssistantMessage: message,
 	}, nil
+}
+
+func (e *InMemoryEngine) streamOrCompleteProviderTurn(record *sessionRecord, turnID string, commandID string, profile contracts.AuthProfile, req contracts.CompletionRequest) ([]string, contracts.CompletionResult, error) {
+	stream, err := e.providers.StreamCompletion(context.Background(), profile, req)
+	if err == nil && stream != nil {
+		deltas, streamErr := e.consumeProviderStreamLocked(record, turnID, commandID, stream)
+		if streamErr != nil {
+			return nil, contracts.CompletionResult{}, streamErr
+		}
+		return deltas, contracts.CompletionResult{
+			Message: contracts.CanonicalMessage{
+				Role:    "assistant",
+				Content: strings.Join(deltas, ""),
+			},
+		}, nil
+	}
+	if err != nil && !errors.Is(err, provider.ErrCompletionNotImplemented) {
+		return nil, contracts.CompletionResult{}, err
+	}
+
+	completion, completeErr := e.providers.Complete(context.Background(), profile, req)
+	return nil, completion, completeErr
+}
+
+func (e *InMemoryEngine) consumeProviderStreamLocked(record *sessionRecord, turnID string, commandID string, stream <-chan contracts.ProviderEvent) ([]string, error) {
+	deltas := make([]string, 0, 1)
+	for providerEvent := range stream {
+		if providerEvent.Kind != "assistant_delta" {
+			continue
+		}
+		text, _ := providerEvent.Payload["text"].(string)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		deltas = append(deltas, text)
+		if _, err := e.appendEventLocked(record, contracts.EventKindAssistantDelta, contracts.SessionEventPayload{
+			CommandID: commandID,
+			TurnID:    turnID,
+			Message: &contracts.CanonicalMessage{
+				Role:    "assistant",
+				Content: text,
+			},
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return deltas, nil
 }
 
 func shouldRetryOAuthCompletion(err error, profile contracts.AuthProfile) bool {

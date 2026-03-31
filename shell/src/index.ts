@@ -260,6 +260,7 @@ function createRenderer(rawEvents: boolean) {
   let headerPrinted = false;
   let currentState: SessionStateSnapshot | null = null;
   const pendingPermissions: PermissionEventPayload[] = [];
+  const streamedTurns = new Set<string>();
   let decisionSignals = 0;
   let notifyDecision: (() => void) | null = null;
 
@@ -302,9 +303,28 @@ function createRenderer(rawEvents: boolean) {
         currentState = state;
       }
 
-      const rendered = renderEvent(event);
-      if (rendered !== "") {
-        print(rendered);
+      if (event.kind === "assistant_delta") {
+        if (event.payload.turn_id !== "") {
+          streamedTurns.add(event.payload.turn_id);
+        }
+        const rendered = renderEvent(event);
+        if (rendered !== "") {
+          print(rendered);
+        }
+        return;
+      }
+
+      if (
+        event.kind === "assistant_message" &&
+        event.payload.turn_id !== "" &&
+        streamedTurns.has(event.payload.turn_id)
+      ) {
+        streamedTurns.delete(event.payload.turn_id);
+      } else {
+        const rendered = renderEvent(event);
+        if (rendered !== "") {
+          print(rendered);
+        }
       }
 
       if (event.kind === "permission_requested" && event.payload.permission) {
@@ -357,6 +377,10 @@ function renderEvent(event: SessionEvent): string {
     case "user_message_accepted":
       return event.payload.message?.content
         ? `user: ${event.payload.message.content}`
+        : "";
+    case "assistant_delta":
+      return event.payload.message?.content
+        ? `assistant(stream): ${event.payload.message.content}`
         : "";
     case "assistant_message":
       return event.payload.message?.content

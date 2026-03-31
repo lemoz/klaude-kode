@@ -258,6 +258,44 @@ func TestCompleteAllowsOpenRouterCustomModels(t *testing.T) {
 	}
 }
 
+func TestStreamCompletionEmitsAssistantDelta(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+	profile := contracts.AuthProfile{
+		ID:       "anthropic-main",
+		Kind:     contracts.AuthProfileAnthropicAPIKey,
+		Provider: contracts.ProviderAnthropic,
+		Settings: map[string]string{
+			"api_key": "secret",
+		},
+	}
+
+	stream, err := registry.StreamCompletion(ctx, profile, contracts.CompletionRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []contracts.CanonicalMessage{
+			{Role: "user", Content: "hello streamed provider"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StreamCompletion returned error: %v", err)
+	}
+
+	events := make([]contracts.ProviderEvent, 0, 1)
+	for event := range stream {
+		events = append(events, event)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 provider stream event, got %d", len(events))
+	}
+	if events[0].Kind != "assistant_delta" {
+		t.Fatalf("expected assistant_delta provider event, got %s", events[0].Kind)
+	}
+	text, _ := events[0].Payload["text"].(string)
+	if !strings.Contains(text, "Anthropic response from claude-sonnet-4-6") {
+		t.Fatalf("expected streamed anthropic text, got %q", text)
+	}
+}
+
 func TestCompleteUsesLiveAnthropicAPIWhenEnvCredentialAndAPIBasePresent(t *testing.T) {
 	ctx := context.Background()
 	registry := DefaultRegistry()
