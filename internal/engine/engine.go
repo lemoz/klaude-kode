@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
+	"github.com/cdossman/klaude-kode/internal/toolruntime"
 )
 
 type Engine interface {
@@ -27,6 +28,7 @@ type InMemoryEngine struct {
 	sessions         map[string]*sessionRecord
 	nextSubscriberID uint64
 	store            sessionStore
+	toolRuntime      toolruntime.Runtime
 }
 
 type sessionRecord struct {
@@ -50,7 +52,8 @@ type recordSnapshot struct {
 
 func NewInMemoryEngine() *InMemoryEngine {
 	return &InMemoryEngine{
-		sessions: make(map[string]*sessionRecord),
+		sessions:    make(map[string]*sessionRecord),
+		toolRuntime: toolruntime.NewBuiltinRuntime(),
 	}
 }
 
@@ -60,8 +63,9 @@ func NewFileBackedEngine(root string) (*InMemoryEngine, error) {
 		return nil, err
 	}
 	return &InMemoryEngine{
-		sessions: make(map[string]*sessionRecord),
-		store:    store,
+		sessions:    make(map[string]*sessionRecord),
+		store:       store,
+		toolRuntime: toolruntime.NewBuiltinRuntime(),
 	}, nil
 }
 
@@ -301,24 +305,30 @@ func (e *InMemoryEngine) handleUserInputLocked(record *sessionRecord, cmd contra
 		return err
 	}
 
+	previousOutcome := record.summary.TerminalOutcome
+	outcome, assistantMessage, err := e.runTurnLocked(record, turnID, cmd.CommandID, text)
+	if err != nil {
+		record.summary.TerminalOutcome = previousOutcome
+		return err
+	}
+
+	record.summary.TerminalOutcome = outcome
 	if _, err := e.appendEventLocked(record, contracts.EventKindAssistantMessage, contracts.SessionEventPayload{
 		CommandID: cmd.CommandID,
 		TurnID:    turnID,
 		Message: &contracts.CanonicalMessage{
 			Role:    "assistant",
-			Content: scaffoldAssistantReply(record.handle.Model, text),
+			Content: assistantMessage,
 		},
 	}); err != nil {
+		record.summary.TerminalOutcome = previousOutcome
 		return err
 	}
-
-	previousOutcome := record.summary.TerminalOutcome
-	record.summary.TerminalOutcome = contracts.TerminalOutcomeSuccess
 	if _, err := e.appendEventLocked(record, contracts.EventKindLifecycle, contracts.SessionEventPayload{
 		CommandID:       cmd.CommandID,
 		TurnID:          turnID,
 		LifecycleName:   "turn_completed",
-		TerminalOutcome: contracts.TerminalOutcomeSuccess,
+		TerminalOutcome: outcome,
 	}); err != nil {
 		record.summary.TerminalOutcome = previousOutcome
 		return err
@@ -569,4 +579,167 @@ func scaffoldAssistantReply(model string, userText string) string {
 		model,
 		userText,
 	)
+}
+
+func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, commandID string, userText string) (contracts.TerminalOutcome, string, error) {
+	call, isToolCall := toolruntime.ParseInlineToolCall(userText)
+	if !isToolCall {
+		return contracts.TerminalOutcomeSuccess, scaffoldAssistantReply(record.handle.Model, userText), nil
+	}
+
+	call.ID = fmt.Sprintf("tool_%s_1", turnID)
+	descriptor, err := e.lookupToolDescriptorLocked(record, call.Name)
+	if err != nil {
+		if emitErr := e.emitTurnFailureLocked(record, turnID, commandID, err, contracts.TerminalOutcomeToolFailure); emitErr != nil {
+			return contracts.TerminalOutcomeNone, "", emitErr
+		}
+		return contracts.TerminalOutcomeToolFailure, fmt.Sprintf("Tool %s failed: %v", call.Name, err), nil
+	}
+
+	if _, err := e.appendEventLocked(record, contracts.EventKindToolCallRequested, contracts.SessionEventPayload{
+		CommandID: commandID,
+		TurnID:    turnID,
+		Tool: &contracts.ToolEventPayload{
+			CallID:           call.ID,
+			Name:             descriptor.Name,
+			Input:            call.Input,
+			ConcurrencyClass: descriptor.ConcurrencyClass,
+		},
+	}); err != nil {
+		return contracts.TerminalOutcomeNone, "", err
+	}
+
+	if descriptor.RequiresPermission {
+		requestID := fmt.Sprintf("perm_%s", call.ID)
+		if _, err := e.appendEventLocked(record, contracts.EventKindPermissionRequested, contracts.SessionEventPayload{
+			CommandID: commandID,
+			TurnID:    turnID,
+			Permission: &contracts.PermissionEventPayload{
+				RequestID:    requestID,
+				ToolCallID:   call.ID,
+				PolicySource: "builtin_headless_policy",
+				Prompt:       fmt.Sprintf("Allow %s to access %s?", descriptor.Name, descriptor.PermissionScope),
+				Scope:        descriptor.PermissionScope,
+			},
+		}); err != nil {
+			return contracts.TerminalOutcomeNone, "", err
+		}
+		if _, err := e.appendEventLocked(record, contracts.EventKindPermissionResolved, contracts.SessionEventPayload{
+			CommandID: commandID,
+			TurnID:    turnID,
+			Permission: &contracts.PermissionEventPayload{
+				RequestID:    requestID,
+				ToolCallID:   call.ID,
+				PolicySource: "builtin_headless_policy",
+				Scope:        descriptor.PermissionScope,
+				Resolution:   "allow_once",
+				Actor:        "auto",
+			},
+		}); err != nil {
+			return contracts.TerminalOutcomeNone, "", err
+		}
+	}
+
+	sessionContext := contracts.SessionContext{
+		SessionID: record.handle.SessionID,
+		CWD:       record.handle.CWD,
+		Mode:      record.handle.Mode,
+		ProfileID: record.handle.ProfileID,
+		Model:     record.handle.Model,
+	}
+	stream, err := e.toolRuntime.ExecuteTool(context.Background(), sessionContext, call)
+	if err != nil {
+		if emitErr := e.emitTurnFailureLocked(record, turnID, commandID, err, contracts.TerminalOutcomeToolFailure); emitErr != nil {
+			return contracts.TerminalOutcomeNone, "", emitErr
+		}
+		return contracts.TerminalOutcomeToolFailure, fmt.Sprintf("Tool %s failed: %v", call.Name, err), nil
+	}
+
+	resultSummary := ""
+	output := ""
+	failed := false
+	for toolEvent := range stream {
+		switch toolEvent.Kind {
+		case contracts.ToolEventKindProgress:
+			if _, err := e.appendEventLocked(record, contracts.EventKindToolCallProgress, contracts.SessionEventPayload{
+				CommandID: commandID,
+				TurnID:    turnID,
+				Tool: &contracts.ToolEventPayload{
+					CallID:           call.ID,
+					Name:             call.Name,
+					Input:            call.Input,
+					ConcurrencyClass: descriptor.ConcurrencyClass,
+					ProgressMessage:  toolEvent.Message,
+				},
+			}); err != nil {
+				return contracts.TerminalOutcomeNone, "", err
+			}
+		case contracts.ToolEventKindCompleted:
+			resultSummary = toolEvent.ResultSummary
+			output = toolEvent.Output
+			failed = toolEvent.Failed
+		}
+	}
+
+	if _, err := e.appendEventLocked(record, contracts.EventKindToolCallCompleted, contracts.SessionEventPayload{
+		CommandID: commandID,
+		TurnID:    turnID,
+		Tool: &contracts.ToolEventPayload{
+			CallID:           call.ID,
+			Name:             call.Name,
+			Input:            call.Input,
+			ConcurrencyClass: descriptor.ConcurrencyClass,
+			ResultSummary:    resultSummary,
+			Output:           output,
+			Failed:           failed,
+		},
+	}); err != nil {
+		return contracts.TerminalOutcomeNone, "", err
+	}
+
+	if failed {
+		err := fmt.Errorf("%s reported failure", call.Name)
+		if emitErr := e.emitTurnFailureLocked(record, turnID, commandID, err, contracts.TerminalOutcomeToolFailure); emitErr != nil {
+			return contracts.TerminalOutcomeNone, "", emitErr
+		}
+		return contracts.TerminalOutcomeToolFailure, fmt.Sprintf("Tool %s failed: %s", call.Name, resultSummary), nil
+	}
+
+	return contracts.TerminalOutcomeSuccess, fmt.Sprintf("Tool %s completed. %s Output: %s", call.Name, resultSummary, output), nil
+}
+
+func (e *InMemoryEngine) lookupToolDescriptorLocked(record *sessionRecord, name string) (contracts.ToolDescriptor, error) {
+	tools, err := e.toolRuntime.ListTools(context.Background(), contracts.SessionContext{
+		SessionID: record.handle.SessionID,
+		CWD:       record.handle.CWD,
+		Mode:      record.handle.Mode,
+		ProfileID: record.handle.ProfileID,
+		Model:     record.handle.Model,
+	})
+	if err != nil {
+		return contracts.ToolDescriptor{}, err
+	}
+	for _, descriptor := range tools {
+		if descriptor.Name == name {
+			return descriptor, nil
+		}
+	}
+	return contracts.ToolDescriptor{}, fmt.Errorf("unknown tool: %s", name)
+}
+
+func (e *InMemoryEngine) emitTurnFailureLocked(record *sessionRecord, turnID string, commandID string, cause error, outcome contracts.TerminalOutcome) error {
+	if _, err := e.appendEventLocked(record, contracts.EventKindFailure, contracts.SessionEventPayload{
+		CommandID: commandID,
+		TurnID:    turnID,
+		Failure: &contracts.FailurePayload{
+			Category:  contracts.FailureCategoryTool,
+			Code:      "tool_execution_failed",
+			Message:   cause.Error(),
+			Retryable: false,
+		},
+	}); err != nil {
+		return err
+	}
+	record.summary.TerminalOutcome = outcome
+	return nil
 }

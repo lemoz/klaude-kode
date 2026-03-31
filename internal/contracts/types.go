@@ -57,6 +57,11 @@ const (
 	EventKindLifecycle           EventKind = "lifecycle"
 	EventKindUserMessageAccepted EventKind = "user_message_accepted"
 	EventKindAssistantMessage    EventKind = "assistant_message"
+	EventKindToolCallRequested   EventKind = "tool_call_requested"
+	EventKindToolCallProgress    EventKind = "tool_call_progress"
+	EventKindToolCallCompleted   EventKind = "tool_call_completed"
+	EventKindPermissionRequested EventKind = "permission_requested"
+	EventKindPermissionResolved  EventKind = "permission_resolved"
 	EventKindSessionState        EventKind = "session_state"
 	EventKindWarning             EventKind = "warning"
 	EventKindFailure             EventKind = "failure"
@@ -186,16 +191,39 @@ type SessionEvent struct {
 }
 
 type SessionEventPayload struct {
-	CommandID       string                `json:"command_id"`
-	TurnID          string                `json:"turn_id"`
-	Source          MessageSource         `json:"source"`
-	Message         *CanonicalMessage     `json:"message"`
-	State           *SessionStateSnapshot `json:"state"`
-	LifecycleName   string                `json:"lifecycle_name"`
-	TerminalOutcome TerminalOutcome       `json:"terminal_outcome"`
-	Warning         string                `json:"warning"`
-	Failure         *FailurePayload       `json:"failure"`
-	Reason          string                `json:"reason"`
+	CommandID       string                  `json:"command_id"`
+	TurnID          string                  `json:"turn_id"`
+	Source          MessageSource           `json:"source"`
+	Message         *CanonicalMessage       `json:"message"`
+	State           *SessionStateSnapshot   `json:"state"`
+	Tool            *ToolEventPayload       `json:"tool"`
+	Permission      *PermissionEventPayload `json:"permission"`
+	LifecycleName   string                  `json:"lifecycle_name"`
+	TerminalOutcome TerminalOutcome         `json:"terminal_outcome"`
+	Warning         string                  `json:"warning"`
+	Failure         *FailurePayload         `json:"failure"`
+	Reason          string                  `json:"reason"`
+}
+
+type ToolEventPayload struct {
+	CallID           string         `json:"call_id"`
+	Name             string         `json:"name"`
+	Input            map[string]any `json:"input"`
+	ConcurrencyClass string         `json:"concurrency_class"`
+	ProgressMessage  string         `json:"progress_message"`
+	ResultSummary    string         `json:"result_summary"`
+	Output           string         `json:"output"`
+	Failed           bool           `json:"failed"`
+}
+
+type PermissionEventPayload struct {
+	RequestID    string `json:"request_id"`
+	ToolCallID   string `json:"tool_call_id"`
+	PolicySource string `json:"policy_source"`
+	Prompt       string `json:"prompt"`
+	Scope        string `json:"scope"`
+	Resolution   string `json:"resolution"`
+	Actor        string `json:"actor"`
 }
 
 type FailurePayload struct {
@@ -263,10 +291,19 @@ type ProfileValidationResult struct {
 }
 
 type ToolDescriptor struct {
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	ConcurrencyClass string `json:"concurrency_class"`
+	Name               string `json:"name"`
+	Description        string `json:"description"`
+	ConcurrencyClass   string `json:"concurrency_class"`
+	RequiresPermission bool   `json:"requires_permission"`
+	PermissionScope    string `json:"permission_scope"`
 }
+
+type ToolEventKind string
+
+const (
+	ToolEventKindProgress  ToolEventKind = "progress"
+	ToolEventKindCompleted ToolEventKind = "completed"
+)
 
 type ToolCall struct {
 	ID    string         `json:"id"`
@@ -275,8 +312,11 @@ type ToolCall struct {
 }
 
 type ToolEvent struct {
-	Kind    string         `json:"kind"`
-	Payload map[string]any `json:"payload"`
+	Kind          ToolEventKind `json:"kind"`
+	Message       string        `json:"message"`
+	ResultSummary string        `json:"result_summary"`
+	Output        string        `json:"output"`
+	Failed        bool          `json:"failed"`
 }
 
 type ResourceSnapshot struct {

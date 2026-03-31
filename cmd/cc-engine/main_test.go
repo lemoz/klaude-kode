@@ -153,3 +153,39 @@ func TestResumePersistedSession(t *testing.T) {
 		t.Fatalf("expected 9 replayed events, got %d", len(got.Events))
 	}
 }
+
+func TestRunToolPromptIncludesPermissionAndToolEvents(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	err := run([]string{
+		"-format=json",
+		"-prompt=tool:pwd",
+		"-session-id=tool-run",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var got result
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse tool json output: %v", err)
+	}
+	if len(got.Events) != 14 {
+		t.Fatalf("expected 14 events for tool prompt, got %d", len(got.Events))
+	}
+	if got.Events[5].Kind != contracts.EventKindPermissionRequested {
+		t.Fatalf("expected permission_requested, got %s", got.Events[5].Kind)
+	}
+	if got.Events[8].Kind != contracts.EventKindToolCallCompleted {
+		t.Fatalf("expected tool_call_completed, got %s", got.Events[8].Kind)
+	}
+	if got.Events[8].Payload.Tool == nil || got.Events[8].Payload.Tool.Output == "" {
+		t.Fatalf("expected tool output in completed event, got %#v", got.Events[8].Payload.Tool)
+	}
+	if got.Events[len(got.Events)-1].Kind != contracts.EventKindSessionClosed {
+		t.Fatalf("expected final event session_closed, got %s", got.Events[len(got.Events)-1].Kind)
+	}
+}

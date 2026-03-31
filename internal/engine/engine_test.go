@@ -170,6 +170,64 @@ func TestCloseSessionPreservesReplayState(t *testing.T) {
 	}
 }
 
+func TestToolTurnEmitsPermissionAndToolLifecycle(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_tool",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeHeadless,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	err = runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "tool:pwd",
+			Source: contracts.MessageSourcePrint,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if len(events) != 12 {
+		t.Fatalf("expected 12 events for tool turn, got %d", len(events))
+	}
+
+	if events[4].Kind != contracts.EventKindToolCallRequested {
+		t.Fatalf("expected tool_call_requested, got %s", events[4].Kind)
+	}
+	if events[5].Kind != contracts.EventKindPermissionRequested {
+		t.Fatalf("expected permission_requested, got %s", events[5].Kind)
+	}
+	if events[6].Kind != contracts.EventKindPermissionResolved {
+		t.Fatalf("expected permission_resolved, got %s", events[6].Kind)
+	}
+	if events[7].Kind != contracts.EventKindToolCallProgress {
+		t.Fatalf("expected tool_call_progress, got %s", events[7].Kind)
+	}
+	if events[8].Kind != contracts.EventKindToolCallCompleted {
+		t.Fatalf("expected tool_call_completed, got %s", events[8].Kind)
+	}
+	if events[8].Payload.Tool == nil || events[8].Payload.Tool.Output != "/tmp/project" {
+		t.Fatalf("expected pwd output /tmp/project, got %#v", events[8].Payload.Tool)
+	}
+	if events[9].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message after tool completion, got %s", events[9].Kind)
+	}
+	if events[10].Kind != contracts.EventKindLifecycle || events[10].Payload.TerminalOutcome != contracts.TerminalOutcomeSuccess {
+		t.Fatalf("expected successful turn_completed lifecycle, got %s (%s)", events[10].Kind, events[10].Payload.TerminalOutcome)
+	}
+}
+
 func nextEvent(t *testing.T, stream <-chan contracts.SessionEvent) contracts.SessionEvent {
 	t.Helper()
 
