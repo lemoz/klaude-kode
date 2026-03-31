@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,8 +13,14 @@ import (
 func TestRunJSONFormat(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
 
-	err := run([]string{"-format=json", "-prompt=hello world", "-session-id=test-json"}, &stdout, &stderr)
+	err := run([]string{
+		"-format=json",
+		"-prompt=hello world",
+		"-session-id=test-json",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
@@ -43,8 +50,14 @@ func TestRunJSONFormat(t *testing.T) {
 func TestRunTextFormat(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
 
-	err := run([]string{"-format=text", "-prompt=text run", "-session-id=test-text"}, &stdout, &stderr)
+	err := run([]string{
+		"-format=text",
+		"-prompt=text run",
+		"-session-id=test-text",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
@@ -64,8 +77,14 @@ func TestRunTextFormat(t *testing.T) {
 func TestRunEventsFormat(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
 
-	err := run([]string{"-format=events", "-prompt=event run", "-session-id=test-events"}, &stdout, &stderr)
+	err := run([]string{
+		"-format=events",
+		"-prompt=event run",
+		"-session-id=test-events",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
@@ -86,5 +105,48 @@ func TestRunEventsFormat(t *testing.T) {
 
 	if last.Kind != contracts.EventKindSessionClosed {
 		t.Fatalf("expected final streamed event session_closed, got %s", last.Kind)
+	}
+}
+
+func TestResumePersistedSession(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-format=json",
+		"-prompt=resume seed",
+		"-session-id=resume-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("initial run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-format=json",
+		"-resume-session=resume-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("resume run returned error: %v", err)
+	}
+
+	var got result
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse resumed json output: %v", err)
+	}
+	if got.Session.SessionID != "resume-target" {
+		t.Fatalf("expected resumed session resume-target, got %s", got.Session.SessionID)
+	}
+	if got.Summary.Status != contracts.SessionStatusClosed {
+		t.Fatalf("expected resumed status closed, got %s", got.Summary.Status)
+	}
+	if len(got.Events) != 6 {
+		t.Fatalf("expected 6 replayed events, got %d", len(got.Events))
 	}
 }

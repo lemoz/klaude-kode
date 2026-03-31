@@ -22,12 +22,14 @@ const (
 )
 
 type config struct {
-	Format    outputFormat
-	Prompt    string
-	SessionID string
-	CWD       string
-	ProfileID string
-	Model     string
+	Format          outputFormat
+	Prompt          string
+	SessionID       string
+	ResumeSessionID string
+	CWD             string
+	ProfileID       string
+	Model           string
+	StateRoot       string
 }
 
 type result struct {
@@ -50,9 +52,16 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return err
 	}
 
-	runtime := engine.NewInMemoryEngine()
+	runtime, err := engine.NewFileBackedEngine(cfg.StateRoot)
+	if err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 
+	if cfg.ResumeSessionID != "" {
+		return renderPersistedSession(ctx, runtime, cfg, stdout)
+	}
 	if cfg.Format == outputFormatEvents {
 		return streamEvents(ctx, runtime, cfg, stdout)
 	}
@@ -72,9 +81,11 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	formatValue := fs.String("format", string(outputFormatJSON), "output format: json, text, events")
 	promptValue := fs.String("prompt", "bootstrap hello from cc-engine", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "engine-bootstrap", "session identifier")
+	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
 	cwdValue := fs.String("cwd", mustGetwd(), "session working directory")
 	profileIDValue := fs.String("profile-id", "headless-default", "active auth profile id")
 	modelValue := fs.String("model", "bootstrap-model", "active model id")
+	stateRootValue := fs.String("state-root", engine.DefaultStateRoot(), "engine state root")
 
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -88,12 +99,14 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	}
 
 	return config{
-		Format:    format,
-		Prompt:    strings.TrimSpace(*promptValue),
-		SessionID: strings.TrimSpace(*sessionIDValue),
-		CWD:       strings.TrimSpace(*cwdValue),
-		ProfileID: strings.TrimSpace(*profileIDValue),
-		Model:     strings.TrimSpace(*modelValue),
+		Format:          format,
+		Prompt:          strings.TrimSpace(*promptValue),
+		SessionID:       strings.TrimSpace(*sessionIDValue),
+		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
+		CWD:             strings.TrimSpace(*cwdValue),
+		ProfileID:       strings.TrimSpace(*profileIDValue),
+		Model:           strings.TrimSpace(*modelValue),
+		StateRoot:       strings.TrimSpace(*stateRootValue),
 	}, nil
 }
 
@@ -110,21 +123,29 @@ func executeHeadlessSession(ctx context.Context, runtime engine.Engine, cfg conf
 		return result{}, err
 	}
 
-	summary, err := runtime.GetSessionSummary(ctx, handle.SessionID)
-	if err != nil {
-		return result{}, err
-	}
-	events, err := runtime.ListEvents(ctx, handle.SessionID)
-	if err != nil {
-		return result{}, err
+	return loadSessionResult(ctx, runtime, handle.SessionID)
+}
+
+func renderPersistedSession(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	if cfg.Format == outputFormatEvents {
+		stream, err := runtime.StreamEvents(ctx, cfg.ResumeSessionID)
+		if err != nil {
+			return err
+		}
+		encoder := json.NewEncoder(stdout)
+		for event := range stream {
+			if err := encoder.Encode(event); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
-	return result{
-		Engine:  "cc-engine",
-		Session: handle,
-		Summary: summary,
-		Events:  events,
-	}, nil
+	sessionResult, err := loadSessionResult(ctx, runtime, cfg.ResumeSessionID)
+	if err != nil {
+		return err
+	}
+	return renderResult(stdout, cfg.Format, sessionResult)
 }
 
 func streamEvents(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
@@ -175,6 +196,29 @@ func sendPrompt(ctx context.Context, runtime engine.Engine, sessionID string, pr
 			Source: contracts.MessageSourcePrint,
 		},
 	})
+}
+
+func loadSessionResult(ctx context.Context, runtime engine.Engine, sessionID string) (result, error) {
+	handle, err := runtime.ResumeSession(ctx, contracts.ResumeSessionRequest{SessionID: sessionID})
+	if err != nil {
+		return result{}, err
+	}
+
+	summary, err := runtime.GetSessionSummary(ctx, handle.SessionID)
+	if err != nil {
+		return result{}, err
+	}
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		return result{}, err
+	}
+
+	return result{
+		Engine:  "cc-engine",
+		Session: handle,
+		Summary: summary,
+		Events:  events,
+	}, nil
 }
 
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
