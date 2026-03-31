@@ -12,6 +12,8 @@ This repo currently contains:
 - an initial repository layout
 - compile-safe Go interfaces and starter binaries
 - a thin TS shell placeholder
+- a phased roadmap that requires verification, testing, commit, and push after
+  every implementation step
 
 ## Repo Layout
 
@@ -46,6 +48,19 @@ The next implementation steps are:
 3. Wire the TS shell to engine events over stdio.
 4. Add Anthropic and OpenRouter provider adapters.
 5. Move tool runtime, permissions, replay, and MCP into engine-owned services.
+6. Add harness-facing replay/eval artifacts and offline benchmark workflows.
+
+## Working Agreement
+
+Every implementation step is atomic and must end with:
+
+1. behavior verification
+2. relevant automated tests or checks
+3. a commit for that step
+4. a push before starting the next step
+
+This repo should not accumulate multiple unfinished steps in one local-only
+change set.
 
 ## Quick Commands
 
@@ -74,4 +89,3 @@ npm run dev
 - [04-compatibility-matrix.md](/Users/cdossman/klaude-kode/docs/04-compatibility-matrix.md)
 - [05-roadmap.md](/Users/cdossman/klaude-kode/docs/05-roadmap.md)
 - [06-test-benchmarks.md](/Users/cdossman/klaude-kode/docs/06-test-benchmarks.md)
-
