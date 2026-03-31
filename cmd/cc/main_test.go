@@ -148,6 +148,32 @@ func TestRunProfilesText(t *testing.T) {
 	}
 }
 
+func TestRunModelsText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	err := run([]string{
+		"-models",
+		"-profile-id=openrouter-main",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc model catalog") {
+		t.Fatalf("expected model catalog header, got %q", output)
+	}
+	if !strings.Contains(output, "profile: openrouter-main") {
+		t.Fatalf("expected openrouter-main in model catalog, got %q", output)
+	}
+	if !strings.Contains(output, "models: openrouter/auto") {
+		t.Fatalf("expected model list in catalog, got %q", output)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 

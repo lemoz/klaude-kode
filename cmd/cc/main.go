@@ -25,6 +25,7 @@ const (
 type config struct {
 	Format          outputFormat
 	ListProfiles    bool
+	ListModels      bool
 	Prompt          string
 	SessionID       string
 	ResumeSessionID string
@@ -45,6 +46,14 @@ type result struct {
 type profileCatalogResult struct {
 	Launcher string                    `json:"launcher"`
 	Profiles []contracts.ProfileStatus `json:"profiles"`
+}
+
+type modelCatalogResult struct {
+	Launcher     string                  `json:"launcher"`
+	ProfileID    string                  `json:"profile_id"`
+	DefaultModel string                  `json:"default_model"`
+	Models       []string                `json:"models"`
+	Capabilities contracts.CapabilitySet `json:"capabilities"`
 }
 
 type collectedEvents struct {
@@ -77,6 +86,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
 	}
+	if cfg.ListModels {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-models does not support -format=events")
+		}
+		return renderModelCatalog(ctx, runtime, cfg, stdout)
+	}
 	if cfg.ResumeSessionID != "" {
 		return renderPersistedSession(ctx, runtime, cfg, stdout)
 	}
@@ -95,6 +110,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 
 	formatValue := fs.String("format", string(outputFormatText), "output format: json, text, events")
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
+	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "cc-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -117,6 +133,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	return config{
 		Format:          format,
 		ListProfiles:    *listProfilesValue,
+		ListModels:      *listModelsValue,
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
@@ -272,6 +289,40 @@ func renderProfileCatalog(ctx context.Context, runtime engine.Engine, format out
 	}
 }
 
+func renderModelCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	profiles, err := runtime.ListProfiles(ctx)
+	if err != nil {
+		return err
+	}
+	if len(profiles) == 0 {
+		return fmt.Errorf("no configured profiles")
+	}
+
+	selected, err := selectProfileStatus(profiles, cfg.ProfileID)
+	if err != nil {
+		return err
+	}
+
+	catalog := modelCatalogResult{
+		Launcher:     "cc",
+		ProfileID:    selected.Profile.ID,
+		DefaultModel: selected.Profile.DefaultModel,
+		Models:       selected.Models,
+		Capabilities: selected.Capabilities,
+	}
+
+	switch cfg.Format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(catalog)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderModelCatalogText(stdout, catalog)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatEvents:
@@ -328,6 +379,22 @@ func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) er
 	return err
 }
 
+func renderModelCatalogText(stdout io.Writer, catalog modelCatalogResult) error {
+	lines := []string{
+		"cc model catalog",
+		fmt.Sprintf("profile: %s", catalog.ProfileID),
+		fmt.Sprintf("default_model: %s", catalog.DefaultModel),
+	}
+	if len(catalog.Models) > 0 {
+		lines = append(lines, fmt.Sprintf("models: %s", strings.Join(catalog.Models, ", ")))
+	}
+	if caps := formatCapabilities(catalog.Capabilities); caps != "" {
+		lines = append(lines, fmt.Sprintf("capabilities: %s", caps))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
 func formatCapabilities(caps contracts.CapabilitySet) string {
 	enabled := make([]string, 0, 9)
 	if caps.Streaming {
@@ -358,6 +425,19 @@ func formatCapabilities(caps contracts.CapabilitySet) string {
 		enabled = append(enabled, "document_input")
 	}
 	return strings.Join(enabled, ", ")
+}
+
+func selectProfileStatus(profiles []contracts.ProfileStatus, profileID string) (contracts.ProfileStatus, error) {
+	trimmed := strings.TrimSpace(profileID)
+	if trimmed == "" {
+		return profiles[0], nil
+	}
+	for _, profile := range profiles {
+		if profile.Profile.ID == trimmed {
+			return profile, nil
+		}
+	}
+	return contracts.ProfileStatus{}, fmt.Errorf("unknown profile: %s", trimmed)
 }
 
 func renderText(stdout io.Writer, sessionResult result) error {

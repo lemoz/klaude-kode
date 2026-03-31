@@ -29,6 +29,7 @@ type config struct {
 	Transport           string
 	Format              outputFormat
 	ListProfiles        bool
+	ListModels          bool
 	UpsertProfile       bool
 	AnthropicOAuthLogin bool
 	LogoutProfileID     string
@@ -63,6 +64,14 @@ type profileCatalogResult struct {
 	Profiles []contracts.ProfileStatus `json:"profiles"`
 }
 
+type modelCatalogResult struct {
+	Engine       string                  `json:"engine"`
+	ProfileID    string                  `json:"profile_id"`
+	DefaultModel string                  `json:"default_model"`
+	Models       []string                `json:"models"`
+	Capabilities contracts.CapabilitySet `json:"capabilities"`
+}
+
 var performAnthropicOAuthLogin = anthropicoauth.PerformLogin
 
 func main() {
@@ -94,6 +103,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 			return fmt.Errorf("-profiles does not support -format=events")
 		}
 		return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
+	}
+	if cfg.ListModels {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-models does not support -format=events")
+		}
+		return renderModelCatalog(ctx, runtime, cfg, stdout)
 	}
 	if cfg.UpsertProfile {
 		if cfg.Format == outputFormatEvents {
@@ -143,6 +158,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	transportValue := fs.String("transport", "headless", "engine transport: headless, stdio")
 	formatValue := fs.String("format", string(outputFormatJSON), "output format: json, text, events")
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
+	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
 	logoutProfileValue := fs.String("logout-profile", "", "clear stored auth from the specified profile and exit")
@@ -186,6 +202,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		Transport:           transportMode,
 		Format:              format,
 		ListProfiles:        *listProfilesValue,
+		ListModels:          *listModelsValue,
 		UpsertProfile:       *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
 		LogoutProfileID:     strings.TrimSpace(*logoutProfileValue),
@@ -438,6 +455,40 @@ func renderProfileCatalog(ctx context.Context, runtime engine.Engine, format out
 	}
 }
 
+func renderModelCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	profiles, err := runtime.ListProfiles(ctx)
+	if err != nil {
+		return err
+	}
+	if len(profiles) == 0 {
+		return fmt.Errorf("no configured profiles")
+	}
+
+	selected, err := selectProfileStatus(profiles, cfg.ProfileID)
+	if err != nil {
+		return err
+	}
+
+	catalog := modelCatalogResult{
+		Engine:       "cc-engine",
+		ProfileID:    selected.Profile.ID,
+		DefaultModel: selected.Profile.DefaultModel,
+		Models:       selected.Models,
+		Capabilities: selected.Capabilities,
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderModelCatalogText(stdout, catalog)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(catalog)
+	}
+}
+
 func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
 	profile, err := buildProfileFromConfig(cfg)
 	if err != nil {
@@ -541,6 +592,22 @@ func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) er
 	return err
 }
 
+func renderModelCatalogText(stdout io.Writer, catalog modelCatalogResult) error {
+	lines := []string{
+		"cc-engine model catalog",
+		fmt.Sprintf("profile: %s", catalog.ProfileID),
+		fmt.Sprintf("default_model: %s", catalog.DefaultModel),
+	}
+	if len(catalog.Models) > 0 {
+		lines = append(lines, fmt.Sprintf("models: %s", strings.Join(catalog.Models, ", ")))
+	}
+	if caps := formatCapabilities(catalog.Capabilities); caps != "" {
+		lines = append(lines, fmt.Sprintf("capabilities: %s", caps))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
 func formatCapabilities(caps contracts.CapabilitySet) string {
 	enabled := make([]string, 0, 9)
 	if caps.Streaming {
@@ -571,6 +638,19 @@ func formatCapabilities(caps contracts.CapabilitySet) string {
 		enabled = append(enabled, "document_input")
 	}
 	return strings.Join(enabled, ", ")
+}
+
+func selectProfileStatus(profiles []contracts.ProfileStatus, profileID string) (contracts.ProfileStatus, error) {
+	trimmed := strings.TrimSpace(profileID)
+	if trimmed == "" {
+		return profiles[0], nil
+	}
+	for _, profile := range profiles {
+		if profile.Profile.ID == trimmed {
+			return profile, nil
+		}
+	}
+	return contracts.ProfileStatus{}, fmt.Errorf("unknown profile: %s", trimmed)
 }
 
 func buildProfileFromConfig(cfg config) (contracts.AuthProfile, error) {

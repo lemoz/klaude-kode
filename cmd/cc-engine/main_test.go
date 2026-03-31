@@ -152,6 +152,36 @@ func TestRunProfilesJSON(t *testing.T) {
 	}
 }
 
+func TestRunModelsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	err := run([]string{
+		"-format=json",
+		"-models",
+		"-profile-id=openrouter-main",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var got modelCatalogResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse model catalog output: %v", err)
+	}
+	if got.ProfileID != "openrouter-main" {
+		t.Fatalf("expected openrouter-main catalog, got %s", got.ProfileID)
+	}
+	if len(got.Models) == 0 {
+		t.Fatalf("expected model list in catalog")
+	}
+	if !got.Capabilities.Streaming {
+		t.Fatalf("expected streaming capability in catalog, got %#v", got.Capabilities)
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

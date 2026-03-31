@@ -8,6 +8,7 @@ import {
   makeDenyPermissionCommand,
   loginAnthropic,
   loginAnthropicOAuth,
+  listModels,
   logoutProfile,
   listProfiles,
   loginOpenRouter,
@@ -167,6 +168,12 @@ async function runInteractiveLoop(
         if (slashCommand?.kind === "profiles") {
           const profiles = await listProfiles(config);
           renderProfiles(ui, profiles);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "models") {
+          const catalog = await listModels(config, slashCommand.profileId);
+          renderModelCatalog(ui, catalog);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -439,6 +446,7 @@ function parseSlashCommand(
 ):
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
   | { kind: "profiles" }
+  | { kind: "models"; profileId?: string }
   | { kind: "logout"; profileId: string }
   | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
   | { kind: "login_anthropic"; credential: string; defaultModel?: string; apiBase?: string }
@@ -451,6 +459,16 @@ function parseSlashCommand(
 
   if (trimmed === "/profiles") {
     return { kind: "profiles" };
+  }
+  if (trimmed === "/models") {
+    return { kind: "models" };
+  }
+  if (trimmed.startsWith("/models ")) {
+    const profileId = trimmed.slice("/models ".length).trim();
+    if (profileId === "") {
+      throw new Error("usage: /models [profile-id]");
+    }
+    return { kind: "models", profileId };
   }
   if (trimmed === "/logout" || trimmed === "/logout anthropic") {
     return { kind: "logout", profileId: "anthropic-main" };
@@ -592,6 +610,22 @@ function renderProfiles(
   }
 }
 
+function renderModelCatalog(
+  ui: ReturnType<typeof createRenderer>,
+  catalog: Awaited<ReturnType<typeof listModels>>,
+): void {
+  ui.writeLine("models:");
+  ui.writeLine(`- profile: ${catalog.profile_id}`);
+  ui.writeLine(`  default_model: ${catalog.default_model}`);
+  if (catalog.models.length > 0) {
+    ui.writeLine(`  available: ${catalog.models.join(", ")}`);
+  }
+  const capabilities = formatCapabilities(catalog.capabilities);
+  if (capabilities !== "") {
+    ui.writeLine(`  capabilities: ${capabilities}`);
+  }
+}
+
 function formatCapabilities(capabilities: ProfileStatus["capabilities"]): string {
   const enabled: string[] = [];
   if (capabilities.streaming) {
@@ -640,6 +674,7 @@ function printHelp(): void {
     "",
     "Interactive commands:",
     "  /profiles",
+    "  /models [profile-id]",
     "  /logout [anthropic|openrouter]",
     "  /profile <id>",
     "  /model <id>",

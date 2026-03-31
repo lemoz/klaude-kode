@@ -88,6 +88,13 @@ export interface ProfileStatus {
   auth: ProfileAuthStatus;
 }
 
+export interface ModelCatalog {
+  profile_id: string;
+  default_model: string;
+  models: string[];
+  capabilities: CapabilitySet;
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -286,6 +293,22 @@ export async function listProfiles(config: Pick<ShellConfig, "stateRoot">): Prom
   ]);
   const parsed = JSON.parse(stdout) as { profiles?: ProfileStatus[] };
   return parsed.profiles ?? [];
+}
+
+export async function listModels(
+  config: Pick<ShellConfig, "stateRoot">,
+  profileID?: string,
+): Promise<ModelCatalog> {
+  const args = [
+    "-format=json",
+    "-models",
+    `-state-root=${config.stateRoot}`,
+  ];
+  if (profileID && profileID.trim() !== "") {
+    args.push(`-profile-id=${profileID.trim()}`);
+  }
+  const stdout = await runEngineAdminCommand(args);
+  return JSON.parse(stdout) as ModelCatalog;
 }
 
 export async function logoutProfile(
