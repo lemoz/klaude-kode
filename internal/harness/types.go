@@ -34,6 +34,17 @@ type EvalRun struct {
 	Failure       *EvalFailureSummary `json:"failure"`
 }
 
+type EvalRunSummary struct {
+	ArtifactRoot string         `json:"artifact_root"`
+	TotalRuns    int            `json:"total_runs"`
+	Completed    int            `json:"completed"`
+	Failed       int            `json:"failed"`
+	AverageScore float64        `json:"average_score"`
+	LatestRunID  string         `json:"latest_run_id"`
+	LatestStatus string         `json:"latest_status"`
+	FailureCodes map[string]int `json:"failure_codes"`
+}
+
 type CandidateValidationResult struct {
 	Valid     bool            `json:"valid"`
 	Issues    []string        `json:"issues"`

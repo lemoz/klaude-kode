@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
@@ -35,6 +36,7 @@ type config struct {
 	ExportReplayPack    bool
 	ValidateCandidate   bool
 	RunReplayEval       bool
+	SummarizeRuns       bool
 	UpsertProfile       bool
 	AnthropicOAuthLogin bool
 	LogoutProfileID     string
@@ -140,6 +142,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return renderCandidateValidation(cfg, stdout)
 	}
+	if cfg.SummarizeRuns {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-summarize-runs does not support -format=events")
+		}
+		return renderRunSummary(cfg, stdout)
+	}
 	if cfg.RunReplayEval {
 		if cfg.Format == outputFormatEvents {
 			return fmt.Errorf("-run-replay-eval does not support -format=events")
@@ -198,6 +206,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
 	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
+	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
 	runReplayEvalValue := fs.Bool("run-replay-eval", false, "run a replay evaluation for the current candidate root and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
@@ -247,6 +256,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ShowStatus:          *showStatusValue,
 		ExportReplayPack:    *exportReplayPackValue,
 		ValidateCandidate:   *validateCandidateValue,
+		SummarizeRuns:       *summarizeRunsValue,
 		RunReplayEval:       *runReplayEvalValue,
 		UpsertProfile:       *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
@@ -636,6 +646,24 @@ func renderReplayEval(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderRunSummary(cfg config, stdout io.Writer) error {
+	summary, err := harness.SummarizeIndexedEvalRuns(harness.DefaultArtifactRoot(cfg.CWD))
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderRunSummaryText(stdout, summary)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(summary)
+	}
+}
+
 func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
 	profile, err := buildProfileFromConfig(cfg)
 	if err != nil {
@@ -821,6 +849,33 @@ func renderReplayEvalText(stdout io.Writer, run harness.EvalRun) error {
 		lines = append(lines, fmt.Sprintf("failure_code: %s", run.Failure.Code))
 		lines = append(lines, fmt.Sprintf("failure_message: %s", run.Failure.Message))
 		lines = append(lines, fmt.Sprintf("retryable: %t", run.Failure.Retryable))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderRunSummaryText(stdout io.Writer, summary harness.EvalRunSummary) error {
+	lines := []string{
+		"cc-engine run summary",
+		fmt.Sprintf("artifact_root: %s", summary.ArtifactRoot),
+		fmt.Sprintf("total_runs: %d", summary.TotalRuns),
+		fmt.Sprintf("completed: %d", summary.Completed),
+		fmt.Sprintf("failed: %d", summary.Failed),
+		fmt.Sprintf("average_score: %.2f", summary.AverageScore),
+		fmt.Sprintf("latest_run: %s", summary.LatestRunID),
+		fmt.Sprintf("latest_status: %s", summary.LatestStatus),
+	}
+	if len(summary.FailureCodes) > 0 {
+		keys := make([]string, 0, len(summary.FailureCodes))
+		for code := range summary.FailureCodes {
+			keys = append(keys, code)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, code := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%d", code, summary.FailureCodes[code]))
+		}
+		lines = append(lines, fmt.Sprintf("failure_codes: %s", strings.Join(parts, ", ")))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err

@@ -327,6 +327,49 @@ func TestRunReplayEvalJSON(t *testing.T) {
 	}
 }
 
+func TestRunSummarizeRunsJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	successReplay := writeReplayPack(t, t.TempDir(), contracts.TerminalOutcomeSuccess)
+	failedReplay := writeReplayPack(t, t.TempDir(), contracts.TerminalOutcomeTaskFailure)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	for _, replayPath := range []string{successReplay, failedReplay} {
+		stdout.Reset()
+		stderr.Reset()
+		if err := run([]string{
+			"-format=json",
+			"-run-replay-eval",
+			"-cwd=" + candidateRoot,
+			"-replay-path=" + replayPath,
+		}, &stdout, &stderr); err != nil {
+			t.Fatalf("replay eval run returned error: %v", err)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	if err := run([]string{
+		"-format=json",
+		"-summarize-runs",
+		"-cwd=" + candidateRoot,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("summarize runs returned error: %v", err)
+	}
+
+	var got harness.EvalRunSummary
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse run summary output: %v", err)
+	}
+	if got.TotalRuns != 2 || got.Completed != 1 || got.Failed != 1 {
+		t.Fatalf("expected 2 total runs with 1 completed and 1 failed, got %#v", got)
+	}
+	if got.FailureCodes["replay_terminal_outcome"] != 1 {
+		t.Fatalf("expected replay_terminal_outcome failure count, got %#v", got.FailureCodes)
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
