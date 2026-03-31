@@ -271,22 +271,7 @@ func TestRunExportReplayPackJSON(t *testing.T) {
 }
 
 func TestRunValidateCandidateJSON(t *testing.T) {
-	root := t.TempDir()
-	for _, dir := range []string{"cmd/cc", "cmd/cc-engine", "shell", "docs"} {
-		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
-			t.Fatalf("MkdirAll returned error: %v", err)
-		}
-	}
-	for _, file := range []string{
-		"cmd/cc/main.go",
-		"cmd/cc-engine/main.go",
-		"shell/package.json",
-		"docs/05-roadmap.md",
-	} {
-		if err := os.WriteFile(filepath.Join(root, file), []byte("stub"), 0o644); err != nil {
-			t.Fatalf("WriteFile returned error: %v", err)
-		}
-	}
+	root := createValidCandidateRoot(t)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -305,6 +290,37 @@ func TestRunValidateCandidateJSON(t *testing.T) {
 	}
 	if !got.Valid {
 		t.Fatalf("expected valid candidate result, got %#v", got)
+	}
+}
+
+func TestRunReplayEvalJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	replayPath := writeReplayPack(t, t.TempDir(), contracts.TerminalOutcomeSuccess)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := run([]string{
+		"-format=json",
+		"-run-replay-eval",
+		"-cwd=" + candidateRoot,
+		"-replay-path=" + replayPath,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var got harness.EvalRun
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse replay eval output: %v", err)
+	}
+	if got.Status != harness.EvalRunStatusCompleted {
+		t.Fatalf("expected completed replay eval, got %#v", got)
+	}
+	if got.Score != 1 {
+		t.Fatalf("expected score 1, got %#v", got)
+	}
+	if got.ReplayPath != replayPath {
+		t.Fatalf("expected replay path %s, got %s", replayPath, got.ReplayPath)
 	}
 }
 
@@ -524,6 +540,61 @@ func TestResumePersistedSession(t *testing.T) {
 	if len(got.Events) != 10 {
 		t.Fatalf("expected 10 replayed events, got %d", len(got.Events))
 	}
+}
+
+func createValidCandidateRoot(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	for _, dir := range []string{"cmd/cc", "cmd/cc-engine", "shell", "docs"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatalf("MkdirAll returned error: %v", err)
+		}
+	}
+	for _, file := range []string{
+		"cmd/cc/main.go",
+		"cmd/cc-engine/main.go",
+		"shell/package.json",
+		"docs/05-roadmap.md",
+	} {
+		if err := os.WriteFile(filepath.Join(root, file), []byte("stub"), 0o644); err != nil {
+			t.Fatalf("WriteFile returned error: %v", err)
+		}
+	}
+	return root
+}
+
+func writeReplayPack(t *testing.T, root string, terminalOutcome contracts.TerminalOutcome) string {
+	t.Helper()
+
+	replayPath := filepath.Join(root, "replay.json")
+	replay := contracts.ReplayPack{
+		SchemaVersion: contracts.SchemaVersionV1,
+		Session: contracts.SessionHandle{
+			SessionID: "replay-session",
+		},
+		Summary: contracts.SessionSummary{
+			SessionID:       "replay-session",
+			Status:          contracts.SessionStatusClosed,
+			TerminalOutcome: terminalOutcome,
+		},
+		Events: []contracts.SessionEvent{
+			{
+				SchemaVersion: contracts.SchemaVersionV1,
+				SessionID:     "replay-session",
+				Sequence:      1,
+				Kind:          contracts.EventKindSessionClosed,
+			},
+		},
+	}
+	encoded, err := json.Marshal(replay)
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
+	}
+	if err := os.WriteFile(replayPath, encoded, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	return replayPath
 }
 
 func TestRunToolPromptIncludesPermissionAndToolEvents(t *testing.T) {
