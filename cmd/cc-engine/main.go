@@ -501,6 +501,12 @@ func buildProfileFromConfig(cfg config) (contracts.AuthProfile, error) {
 		}
 		settings["oauth_host"] = oauthHost
 		settings["account_scope"] = accountScope
+	case contracts.AuthProfileAnthropicAPIKey:
+		apiBase := strings.TrimSpace(cfg.APIBase)
+		if apiBase == "" {
+			apiBase = "https://api.anthropic.com"
+		}
+		settings["api_base"] = apiBase
 	case contracts.AuthProfileOpenRouterAPIKey:
 		apiBase := strings.TrimSpace(cfg.APIBase)
 		if apiBase == "" {

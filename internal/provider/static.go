@@ -98,7 +98,7 @@ func (a *staticAdapter) StreamCompletion(_ context.Context, profile contracts.Au
 	return nil, ErrCompletionNotImplemented
 }
 
-func (a *staticAdapter) Complete(_ context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (contracts.CompletionResult, error) {
+func (a *staticAdapter) Complete(ctx context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (contracts.CompletionResult, error) {
 	if err := a.ensureProfile(profile); err != nil {
 		return contracts.CompletionResult{}, err
 	}
@@ -120,6 +120,14 @@ func (a *staticAdapter) Complete(_ context.Context, profile contracts.AuthProfil
 	}
 	if lastUserText == "" {
 		lastUserText = "no user message provided"
+	}
+
+	liveResult, liveUsed, err := a.maybeCompleteLive(ctx, profile, req, model)
+	if err != nil {
+		return contracts.CompletionResult{}, err
+	}
+	if liveUsed {
+		return liveResult, nil
 	}
 
 	return contracts.CompletionResult{

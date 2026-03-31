@@ -2,6 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -212,6 +215,143 @@ func TestCompleteAllowsOpenRouterCustomModels(t *testing.T) {
 	}
 	if !strings.Contains(result.Message.Content, "OpenRouter response from my/custom-model") {
 		t.Fatalf("expected openrouter response content, got %q", result.Message.Content)
+	}
+}
+
+func TestCompleteUsesLiveAnthropicAPIWhenEnvCredentialAndAPIBasePresent(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+	t.Setenv("ANTHROPIC_TEST_KEY", "anthropic-secret")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("expected /v1/messages path, got %s", r.URL.Path)
+		}
+		if got := r.Header.Get("x-api-key"); got != "anthropic-secret" {
+			t.Fatalf("expected x-api-key header, got %q", got)
+		}
+		if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
+			t.Fatalf("expected anthropic-version header, got %q", got)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if payload["model"] != "claude-sonnet-4-6" {
+			t.Fatalf("expected model claude-sonnet-4-6, got %#v", payload["model"])
+		}
+
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"live anthropic reply"}]}`))
+	}))
+	defer server.Close()
+
+	profile := contracts.AuthProfile{
+		ID:       "anthropic-live",
+		Kind:     contracts.AuthProfileAnthropicAPIKey,
+		Provider: contracts.ProviderAnthropic,
+		Settings: map[string]string{
+			"credential_ref": "env://ANTHROPIC_TEST_KEY",
+			"api_base":       server.URL,
+		},
+	}
+
+	result, err := registry.Complete(ctx, profile, contracts.CompletionRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []contracts.CanonicalMessage{
+			{Role: "user", Content: "hello live anthropic"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if result.Message.Content != "live anthropic reply" {
+		t.Fatalf("expected live anthropic reply, got %q", result.Message.Content)
+	}
+}
+
+func TestCompleteUsesLiveOpenRouterAPIWhenEnvCredentialAndAPIBasePresent(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+	t.Setenv("OPENROUTER_TEST_KEY", "openrouter-secret")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("expected /chat/completions path, got %s", r.URL.Path)
+		}
+		if got := r.Header.Get("authorization"); got != "Bearer openrouter-secret" {
+			t.Fatalf("expected authorization header, got %q", got)
+		}
+		if got := r.Header.Get("http-referer"); got != "https://local.cli" {
+			t.Fatalf("expected http-referer header, got %q", got)
+		}
+		if got := r.Header.Get("x-title"); got != "Klaude Kode" {
+			t.Fatalf("expected x-title header, got %q", got)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if payload["model"] != "openrouter/auto" {
+			t.Fatalf("expected model openrouter/auto, got %#v", payload["model"])
+		}
+
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"live openrouter reply"}}]}`))
+	}))
+	defer server.Close()
+
+	profile := contracts.AuthProfile{
+		ID:       "openrouter-live",
+		Kind:     contracts.AuthProfileOpenRouterAPIKey,
+		Provider: contracts.ProviderOpenRouter,
+		Settings: map[string]string{
+			"credential_ref": "env://OPENROUTER_TEST_KEY",
+			"api_base":       server.URL,
+			"http_referer":   "https://local.cli",
+			"app_name":       "Klaude Kode",
+		},
+	}
+
+	result, err := registry.Complete(ctx, profile, contracts.CompletionRequest{
+		Model: "openrouter/auto",
+		Messages: []contracts.CanonicalMessage{
+			{Role: "user", Content: "hello live openrouter"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if result.Message.Content != "live openrouter reply" {
+		t.Fatalf("expected live openrouter reply, got %q", result.Message.Content)
+	}
+}
+
+func TestCompleteFailsWhenEnvCredentialIsMissing(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+
+	_, err := registry.Complete(ctx, contracts.AuthProfile{
+		ID:       "anthropic-live",
+		Kind:     contracts.AuthProfileAnthropicAPIKey,
+		Provider: contracts.ProviderAnthropic,
+		Settings: map[string]string{
+			"credential_ref": "env://ANTHROPIC_TEST_KEY_MISSING",
+			"api_base":       "https://api.anthropic.com",
+		},
+	}, contracts.CompletionRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []contracts.CanonicalMessage{
+			{Role: "user", Content: "hello missing credential"},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected missing env credential error")
+	}
+	if !strings.Contains(err.Error(), "env://ANTHROPIC_TEST_KEY_MISSING") {
+		t.Fatalf("expected missing env credential in error, got %v", err)
 	}
 }
 
