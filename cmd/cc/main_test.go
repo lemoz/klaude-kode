@@ -117,6 +117,31 @@ func TestRunEventsFormat(t *testing.T) {
 	}
 }
 
+func TestRunProfilesText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	err := run([]string{
+		"-profiles",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc configured profiles") {
+		t.Fatalf("expected profile header, got %q", output)
+	}
+	if !strings.Contains(output, "anthropic-main") {
+		t.Fatalf("expected anthropic-main in profile output, got %q", output)
+	}
+	if !strings.Contains(output, "openrouter-main") {
+		t.Fatalf("expected openrouter-main in profile output, got %q", output)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 

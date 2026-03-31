@@ -291,6 +291,12 @@ type ProfileValidationResult struct {
 	Message string `json:"message"`
 }
 
+type ProfileStatus struct {
+	Profile    AuthProfile             `json:"profile"`
+	Validation ProfileValidationResult `json:"validation"`
+	Models     []string                `json:"models"`
+}
+
 type ToolDescriptor struct {
 	Name               string `json:"name"`
 	Description        string `json:"description"`

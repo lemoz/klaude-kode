@@ -26,6 +26,7 @@ const (
 type config struct {
 	Transport       string
 	Format          outputFormat
+	ListProfiles    bool
 	Prompt          string
 	SessionID       string
 	ResumeSessionID string
@@ -40,6 +41,11 @@ type result struct {
 	Session contracts.SessionHandle  `json:"session"`
 	Summary contracts.SessionSummary `json:"summary"`
 	Events  []contracts.SessionEvent `json:"events"`
+}
+
+type profileCatalogResult struct {
+	Engine   string                    `json:"engine"`
+	Profiles []contracts.ProfileStatus `json:"profiles"`
 }
 
 func main() {
@@ -65,6 +71,13 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 	}
 
 	ctx := context.Background()
+
+	if cfg.ListProfiles {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-profiles does not support -format=events")
+		}
+		return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
+	}
 
 	if cfg.Transport == "stdio" {
 		if cfg.Format != outputFormatEvents {
@@ -94,6 +107,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 
 	transportValue := fs.String("transport", "headless", "engine transport: headless, stdio")
 	formatValue := fs.String("format", string(outputFormatJSON), "output format: json, text, events")
+	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc-engine", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "engine-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -123,6 +137,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	return config{
 		Transport:       transportMode,
 		Format:          format,
+		ListProfiles:    *listProfilesValue,
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
@@ -339,6 +354,29 @@ func loadSessionResult(ctx context.Context, runtime engine.Engine, sessionID str
 	}, nil
 }
 
+func renderProfileCatalog(ctx context.Context, runtime engine.Engine, format outputFormat, stdout io.Writer) error {
+	profiles, err := runtime.ListProfiles(ctx)
+	if err != nil {
+		return err
+	}
+
+	catalog := profileCatalogResult{
+		Engine:   "cc-engine",
+		Profiles: profiles,
+	}
+
+	switch format {
+	case outputFormatText:
+		return renderProfileCatalogText(stdout, catalog)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(catalog)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatText:
@@ -350,6 +388,31 @@ func renderResult(stdout io.Writer, format outputFormat, sessionResult result) e
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(sessionResult)
 	}
+}
+
+func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) error {
+	lines := []string{
+		"cc-engine configured profiles",
+	}
+	for _, profile := range catalog.Profiles {
+		line := fmt.Sprintf(
+			"- %s (%s/%s) default_model=%s valid=%t",
+			profile.Profile.ID,
+			profile.Profile.Provider,
+			profile.Profile.Kind,
+			profile.Profile.DefaultModel,
+			profile.Validation.Valid,
+		)
+		lines = append(lines, line)
+		if profile.Validation.Message != "" {
+			lines = append(lines, fmt.Sprintf("  validation: %s", profile.Validation.Message))
+		}
+		if len(profile.Models) > 0 {
+			lines = append(lines, fmt.Sprintf("  models: %s", strings.Join(profile.Models, ", ")))
+		}
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
 }
 
 func renderText(stdout io.Writer, sessionResult result) error {

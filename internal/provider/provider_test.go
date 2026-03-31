@@ -31,6 +31,8 @@ func TestValidateProfileAcceptsCredentialReference(t *testing.T) {
 		DefaultModel: "claude-sonnet-4-6",
 		Settings: map[string]string{
 			"credential_ref": "keychain://anthropic-main",
+			"oauth_host":     "https://claude.ai",
+			"account_scope":  "claude",
 		},
 	})
 	if err != nil {
@@ -38,6 +40,29 @@ func TestValidateProfileAcceptsCredentialReference(t *testing.T) {
 	}
 	if !result.Valid {
 		t.Fatalf("expected valid profile, got %#v", result)
+	}
+}
+
+func TestValidateProfileRejectsAnthropicOAuthWithoutOAuthSettings(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+
+	result, err := registry.ValidateProfile(ctx, contracts.AuthProfile{
+		ID:       "anthropic-missing-oauth",
+		Kind:     contracts.AuthProfileAnthropicOAuth,
+		Provider: contracts.ProviderAnthropic,
+		Settings: map[string]string{
+			"credential_ref": "keychain://anthropic-missing-oauth",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateProfile returned error: %v", err)
+	}
+	if result.Valid {
+		t.Fatalf("expected invalid profile, got %#v", result)
+	}
+	if !strings.Contains(result.Message, "oauth_host") {
+		t.Fatalf("expected oauth_host validation error, got %q", result.Message)
 	}
 }
 
@@ -61,6 +86,29 @@ func TestValidateProfileRejectsProviderMismatch(t *testing.T) {
 	}
 }
 
+func TestValidateProfileRejectsOpenRouterWithoutAPIBase(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+
+	result, err := registry.ValidateProfile(ctx, contracts.AuthProfile{
+		ID:       "openrouter-main",
+		Kind:     contracts.AuthProfileOpenRouterAPIKey,
+		Provider: contracts.ProviderOpenRouter,
+		Settings: map[string]string{
+			"credential_ref": "keychain://openrouter-main",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateProfile returned error: %v", err)
+	}
+	if result.Valid {
+		t.Fatalf("expected invalid profile, got %#v", result)
+	}
+	if !strings.Contains(result.Message, "api_base") {
+		t.Fatalf("expected api_base validation error, got %q", result.Message)
+	}
+}
+
 func TestOpenRouterCapabilitiesAllowCustomModels(t *testing.T) {
 	ctx := context.Background()
 	registry := DefaultRegistry()
@@ -70,6 +118,7 @@ func TestOpenRouterCapabilitiesAllowCustomModels(t *testing.T) {
 		Provider: contracts.ProviderOpenRouter,
 		Settings: map[string]string{
 			"credential_ref": "keychain://openrouter-main",
+			"api_base":       "https://openrouter.ai/api/v1",
 		},
 	}
 
@@ -93,7 +142,8 @@ func TestCountTokensReturnsDeterministicEstimate(t *testing.T) {
 		Kind:     contracts.AuthProfileOpenRouterAPIKey,
 		Provider: contracts.ProviderOpenRouter,
 		Settings: map[string]string{
-			"api_key": "secret",
+			"api_key":  "secret",
+			"api_base": "https://openrouter.ai/api/v1",
 		},
 	}
 
@@ -147,6 +197,7 @@ func TestCompleteAllowsOpenRouterCustomModels(t *testing.T) {
 		Provider: contracts.ProviderOpenRouter,
 		Settings: map[string]string{
 			"credential_ref": "keychain://openrouter-main",
+			"api_base":       "https://openrouter.ai/api/v1",
 		},
 	}
 

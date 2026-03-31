@@ -160,6 +160,18 @@ func (a *staticAdapter) ValidateProfile(_ context.Context, profile contracts.Aut
 			Message: "credential reference or inline credential is required",
 		}, nil
 	}
+	if err := validateCredentialReference(profile); err != nil {
+		return contracts.ProfileValidationResult{
+			Valid:   false,
+			Message: err.Error(),
+		}, nil
+	}
+	if err := validateProviderSettings(profile); err != nil {
+		return contracts.ProfileValidationResult{
+			Valid:   false,
+			Message: err.Error(),
+		}, nil
+	}
 
 	return contracts.ProfileValidationResult{
 		Valid:   true,
@@ -193,6 +205,36 @@ func hasCredential(profile contracts.AuthProfile) bool {
 		}
 	}
 	return false
+}
+
+func validateCredentialReference(profile contracts.AuthProfile) error {
+	credentialRef := strings.TrimSpace(profile.Settings["credential_ref"])
+	if credentialRef == "" {
+		return nil
+	}
+	if !strings.Contains(credentialRef, "://") {
+		return fmt.Errorf("credential_ref must include a scheme")
+	}
+	return nil
+}
+
+func validateProviderSettings(profile contracts.AuthProfile) error {
+	switch profile.Kind {
+	case contracts.AuthProfileAnthropicOAuth:
+		if strings.TrimSpace(profile.Settings["oauth_host"]) == "" {
+			return fmt.Errorf("oauth_host is required for anthropic_oauth profiles")
+		}
+		if strings.TrimSpace(profile.Settings["account_scope"]) == "" {
+			return fmt.Errorf("account_scope is required for anthropic_oauth profiles")
+		}
+	case contracts.AuthProfileAnthropicAPIKey:
+		return nil
+	case contracts.AuthProfileOpenRouterAPIKey:
+		if strings.TrimSpace(profile.Settings["api_base"]) == "" {
+			return fmt.Errorf("api_base is required for openrouter_api_key profiles")
+		}
+	}
+	return nil
 }
 
 func (a *staticAdapter) responsePrefix() string {

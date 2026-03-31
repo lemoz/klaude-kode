@@ -19,6 +19,7 @@ type Engine interface {
 	StreamEvents(ctx context.Context, sessionID string) (<-chan contracts.SessionEvent, error)
 	ListEvents(ctx context.Context, sessionID string) ([]contracts.SessionEvent, error)
 	ListSessions(ctx context.Context) ([]contracts.SessionSummary, error)
+	ListProfiles(ctx context.Context) ([]contracts.ProfileStatus, error)
 	GetSessionSummary(ctx context.Context, sessionID string) (contracts.SessionSummary, error)
 	ResumeSession(ctx context.Context, req contracts.ResumeSessionRequest) (contracts.SessionHandle, error)
 	CloseSession(ctx context.Context, sessionID string, reason string) error
@@ -266,6 +267,46 @@ func (e *InMemoryEngine) ListSessions(_ context.Context) ([]contracts.SessionSum
 	e.mu.RUnlock()
 
 	return e.store.ListSummaries()
+}
+
+func (e *InMemoryEngine) ListProfiles(ctx context.Context) ([]contracts.ProfileStatus, error) {
+	profiles := []contracts.AuthProfile(nil)
+	if e.profileStore != nil {
+		list, err := e.profileStore.ListProfiles()
+		if err != nil {
+			return nil, err
+		}
+		profiles = list
+	} else {
+		profiles = []contracts.AuthProfile{provider.ResolveSessionProfile("", "")}
+	}
+
+	statuses := make([]contracts.ProfileStatus, 0, len(profiles))
+	for _, profile := range profiles {
+		status := contracts.ProfileStatus{
+			Profile: profile,
+			Validation: contracts.ProfileValidationResult{
+				Valid:   true,
+				Message: "profile is valid",
+			},
+		}
+
+		if e.providers != nil {
+			validation, err := e.providers.ValidateProfile(ctx, profile)
+			if err != nil {
+				return nil, err
+			}
+			status.Validation = validation
+
+			models, err := e.providers.ListModels(ctx, profile)
+			if err == nil {
+				status.Models = models
+			}
+		}
+
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }
 
 func (e *InMemoryEngine) GetSessionSummary(_ context.Context, sessionID string) (contracts.SessionSummary, error) {

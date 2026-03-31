@@ -77,6 +77,28 @@ func TestStartSessionAppliesStoredDefaultProfileAndModel(t *testing.T) {
 	}
 }
 
+func TestListProfilesReturnsStoredProfilesWithValidation(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	profiles, err := runtime.ListProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListProfiles returned error: %v", err)
+	}
+	if len(profiles) != 2 {
+		t.Fatalf("expected 2 stored profiles, got %d", len(profiles))
+	}
+	if profiles[0].Profile.ID != "anthropic-main" {
+		t.Fatalf("expected anthropic-main first, got %s", profiles[0].Profile.ID)
+	}
+	if !profiles[0].Validation.Valid {
+		t.Fatalf("expected first profile to validate, got %#v", profiles[0].Validation)
+	}
+	if len(profiles[0].Models) == 0 {
+		t.Fatalf("expected provider models for first profile")
+	}
+}
+
 func TestStreamEventsReplaysBacklogAndFutureEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

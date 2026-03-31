@@ -111,6 +111,38 @@ func TestRunEventsFormat(t *testing.T) {
 	}
 }
 
+func TestRunProfilesJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	err := run([]string{
+		"-format=json",
+		"-profiles",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var got profileCatalogResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse profile json output: %v", err)
+	}
+	if got.Engine != "cc-engine" {
+		t.Fatalf("expected engine cc-engine, got %q", got.Engine)
+	}
+	if len(got.Profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(got.Profiles))
+	}
+	if got.Profiles[0].Profile.ID != "anthropic-main" {
+		t.Fatalf("expected anthropic-main first, got %s", got.Profiles[0].Profile.ID)
+	}
+	if !got.Profiles[0].Validation.Valid {
+		t.Fatalf("expected first profile to validate, got %#v", got.Profiles[0].Validation)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 

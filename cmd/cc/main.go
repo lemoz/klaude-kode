@@ -24,6 +24,7 @@ const (
 
 type config struct {
 	Format          outputFormat
+	ListProfiles    bool
 	Prompt          string
 	SessionID       string
 	ResumeSessionID string
@@ -39,6 +40,11 @@ type result struct {
 	Session   contracts.SessionHandle  `json:"session"`
 	Summary   contracts.SessionSummary `json:"summary"`
 	Events    []contracts.SessionEvent `json:"events"`
+}
+
+type profileCatalogResult struct {
+	Launcher string                    `json:"launcher"`
+	Profiles []contracts.ProfileStatus `json:"profiles"`
 }
 
 type collectedEvents struct {
@@ -65,6 +71,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	ctx := context.Background()
+	if cfg.ListProfiles {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-profiles does not support -format=events")
+		}
+		return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
+	}
 	if cfg.ResumeSessionID != "" {
 		return renderPersistedSession(ctx, runtime, cfg, stdout)
 	}
@@ -82,6 +94,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	fs.SetOutput(stderr)
 
 	formatValue := fs.String("format", string(outputFormatText), "output format: json, text, events")
+	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "cc-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -103,6 +116,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 
 	return config{
 		Format:          format,
+		ListProfiles:    *listProfilesValue,
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
@@ -235,6 +249,29 @@ func loadSessionResult(ctx context.Context, runtime engine.Engine, sessionID str
 	}, nil
 }
 
+func renderProfileCatalog(ctx context.Context, runtime engine.Engine, format outputFormat, stdout io.Writer) error {
+	profiles, err := runtime.ListProfiles(ctx)
+	if err != nil {
+		return err
+	}
+
+	catalog := profileCatalogResult{
+		Launcher: "cc",
+		Profiles: profiles,
+	}
+
+	switch format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(catalog)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderProfileCatalogText(stdout, catalog)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatEvents:
@@ -254,6 +291,31 @@ func renderResult(stdout io.Writer, format outputFormat, sessionResult result) e
 	default:
 		return renderText(stdout, sessionResult)
 	}
+}
+
+func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) error {
+	lines := []string{
+		"cc configured profiles",
+	}
+	for _, profile := range catalog.Profiles {
+		line := fmt.Sprintf(
+			"- %s (%s/%s) default_model=%s valid=%t",
+			profile.Profile.ID,
+			profile.Profile.Provider,
+			profile.Profile.Kind,
+			profile.Profile.DefaultModel,
+			profile.Validation.Valid,
+		)
+		lines = append(lines, line)
+		if profile.Validation.Message != "" {
+			lines = append(lines, fmt.Sprintf("  validation: %s", profile.Validation.Message))
+		}
+		if len(profile.Models) > 0 {
+			lines = append(lines, fmt.Sprintf("  models: %s", strings.Join(profile.Models, ", ")))
+		}
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
 }
 
 func renderText(stdout io.Writer, sessionResult result) error {
