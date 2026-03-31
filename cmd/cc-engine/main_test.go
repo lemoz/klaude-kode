@@ -143,6 +143,52 @@ func TestRunProfilesJSON(t *testing.T) {
 	}
 }
 
+func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	err := run([]string{
+		"-format=json",
+		"-upsert-profile",
+		"-profile-id=openrouter-alt",
+		"-provider=openrouter",
+		"-profile-kind=openrouter_api_key",
+		"-display-name=OpenRouter Alt",
+		"-default-model=openrouter/auto",
+		"-credential-ref=env://OPENROUTER_API_KEY",
+		"-make-default",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("upsert run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-format=json",
+		"-prompt=hello after profile save",
+		"-session-id=profile-save-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("follow-up run returned error: %v", err)
+	}
+
+	var got result
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse follow-up json output: %v", err)
+	}
+	if got.Session.ProfileID != "openrouter-alt" {
+		t.Fatalf("expected saved default profile openrouter-alt, got %s", got.Session.ProfileID)
+	}
+	if got.Session.Model != "openrouter/auto" {
+		t.Fatalf("expected saved default model openrouter/auto, got %s", got.Session.Model)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 

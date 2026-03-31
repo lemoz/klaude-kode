@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
@@ -17,6 +18,8 @@ type ProfileStore interface {
 	ListProfiles() ([]contracts.AuthProfile, error)
 	GetProfile(id string) (contracts.AuthProfile, error)
 	ResolveProfile(profileID string, model string) (contracts.AuthProfile, error)
+	SaveProfile(profile contracts.AuthProfile) error
+	SetDefaultProfile(id string) error
 }
 
 type profileFile struct {
@@ -66,6 +69,29 @@ func (s *memoryProfileStore) ResolveProfile(profileID string, model string) (con
 	return resolveProfileData(s.data, profileID, model)
 }
 
+func (s *memoryProfileStore) SaveProfile(profile contracts.AuthProfile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := upsertProfileData(s.data, profile)
+	if err != nil {
+		return err
+	}
+	s.data = data
+	return nil
+}
+
+func (s *memoryProfileStore) SetDefaultProfile(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := findProfileByID(s.data.Profiles, id); err != nil {
+		return err
+	}
+	s.data.DefaultProfileID = id
+	return nil
+}
+
 func (s *fileProfileStore) ListProfiles() ([]contracts.AuthProfile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,6 +123,36 @@ func (s *fileProfileStore) ResolveProfile(profileID string, model string) (contr
 		return contracts.AuthProfile{}, err
 	}
 	return resolveProfileData(data, profileID, model)
+}
+
+func (s *fileProfileStore) SaveProfile(profile contracts.AuthProfile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.readProfilesLocked()
+	if err != nil {
+		return err
+	}
+	data, err = upsertProfileData(data, profile)
+	if err != nil {
+		return err
+	}
+	return s.writeProfilesLocked(data)
+}
+
+func (s *fileProfileStore) SetDefaultProfile(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.readProfilesLocked()
+	if err != nil {
+		return err
+	}
+	if _, err := findProfileByID(data.Profiles, id); err != nil {
+		return err
+	}
+	data.DefaultProfileID = id
+	return s.writeProfilesLocked(data)
 }
 
 func (s *fileProfileStore) ensureLayout() error {
@@ -191,6 +247,13 @@ func resolveProfileData(data profileFile, profileID string, model string) (contr
 		return findProfileByID(data.Profiles, profileID)
 	}
 
+	if !hasExplicitProviderHint(profileID, model) && data.DefaultProfileID != "" {
+		profile, err := findProfileByID(data.Profiles, data.DefaultProfileID)
+		if err == nil {
+			return profile, nil
+		}
+	}
+
 	providerKind := inferProviderKind(profileID, model)
 	if profile, ok := profileForProvider(data, providerKind); ok {
 		return profile, nil
@@ -250,4 +313,42 @@ func cloneProfile(profile contracts.AuthProfile) contracts.AuthProfile {
 		}
 	}
 	return cloned
+}
+
+func hasExplicitProviderHint(profileID string, model string) bool {
+	lowerProfileID := strings.ToLower(strings.TrimSpace(profileID))
+	lowerModel := strings.ToLower(strings.TrimSpace(model))
+	if lowerModel != "" {
+		return true
+	}
+	return strings.Contains(lowerProfileID, "openrouter") || strings.Contains(lowerProfileID, "anthropic")
+}
+
+func upsertProfileData(data profileFile, profile contracts.AuthProfile) (profileFile, error) {
+	if profile.ID == "" {
+		return profileFile{}, fmt.Errorf("profile id is required")
+	}
+	if profile.Provider == "" {
+		return profileFile{}, fmt.Errorf("profile provider is required")
+	}
+	if profile.Kind == "" {
+		return profileFile{}, fmt.Errorf("profile kind is required")
+	}
+
+	next := profileFile{
+		Profiles:         cloneProfiles(data.Profiles),
+		DefaultProfileID: data.DefaultProfileID,
+	}
+	replaced := false
+	for index, existing := range next.Profiles {
+		if existing.ID == profile.ID {
+			next.Profiles[index] = cloneProfile(profile)
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		next.Profiles = append(next.Profiles, cloneProfile(profile))
+	}
+	return next, nil
 }

@@ -99,6 +99,49 @@ func TestListProfilesReturnsStoredProfilesWithValidation(t *testing.T) {
 	}
 }
 
+func TestSaveProfilePersistsNewDefaultProfile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	runtime, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+
+	status, err := runtime.SaveProfile(ctx, contracts.AuthProfile{
+		ID:           "openrouter-alt",
+		Kind:         contracts.AuthProfileOpenRouterAPIKey,
+		Provider:     contracts.ProviderOpenRouter,
+		DisplayName:  "OpenRouter Alt",
+		DefaultModel: "openrouter/auto",
+		Settings: map[string]string{
+			"credential_ref": "env://OPENROUTER_API_KEY",
+			"api_base":       "https://openrouter.ai/api/v1",
+		},
+	}, true)
+	if err != nil {
+		t.Fatalf("SaveProfile returned error: %v", err)
+	}
+	if !status.Validation.Valid {
+		t.Fatalf("expected valid saved profile, got %#v", status.Validation)
+	}
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_saved_default",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+	if handle.ProfileID != "openrouter-alt" {
+		t.Fatalf("expected saved default profile to resolve, got %s", handle.ProfileID)
+	}
+	if handle.Model != "openrouter/auto" {
+		t.Fatalf("expected saved default model to resolve, got %s", handle.Model)
+	}
+}
+
 func TestStreamEventsReplaysBacklogAndFutureEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

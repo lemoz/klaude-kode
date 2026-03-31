@@ -20,6 +20,7 @@ type Engine interface {
 	ListEvents(ctx context.Context, sessionID string) ([]contracts.SessionEvent, error)
 	ListSessions(ctx context.Context) ([]contracts.SessionSummary, error)
 	ListProfiles(ctx context.Context) ([]contracts.ProfileStatus, error)
+	SaveProfile(ctx context.Context, profile contracts.AuthProfile, makeDefault bool) (contracts.ProfileStatus, error)
 	GetSessionSummary(ctx context.Context, sessionID string) (contracts.SessionSummary, error)
 	ResumeSession(ctx context.Context, req contracts.ResumeSessionRequest) (contracts.SessionHandle, error)
 	CloseSession(ctx context.Context, sessionID string, reason string) error
@@ -283,30 +284,37 @@ func (e *InMemoryEngine) ListProfiles(ctx context.Context) ([]contracts.ProfileS
 
 	statuses := make([]contracts.ProfileStatus, 0, len(profiles))
 	for _, profile := range profiles {
-		status := contracts.ProfileStatus{
-			Profile: profile,
-			Validation: contracts.ProfileValidationResult{
-				Valid:   true,
-				Message: "profile is valid",
-			},
+		status, err := e.buildProfileStatus(ctx, profile)
+		if err != nil {
+			return nil, err
 		}
-
-		if e.providers != nil {
-			validation, err := e.providers.ValidateProfile(ctx, profile)
-			if err != nil {
-				return nil, err
-			}
-			status.Validation = validation
-
-			models, err := e.providers.ListModels(ctx, profile)
-			if err == nil {
-				status.Models = models
-			}
-		}
-
 		statuses = append(statuses, status)
 	}
 	return statuses, nil
+}
+
+func (e *InMemoryEngine) SaveProfile(ctx context.Context, profile contracts.AuthProfile, makeDefault bool) (contracts.ProfileStatus, error) {
+	if e.profileStore == nil {
+		return contracts.ProfileStatus{}, fmt.Errorf("profile store is unavailable")
+	}
+
+	status, err := e.buildProfileStatus(ctx, profile)
+	if err != nil {
+		return contracts.ProfileStatus{}, err
+	}
+	if !status.Validation.Valid {
+		return contracts.ProfileStatus{}, fmt.Errorf(status.Validation.Message)
+	}
+
+	if err := e.profileStore.SaveProfile(profile); err != nil {
+		return contracts.ProfileStatus{}, err
+	}
+	if makeDefault {
+		if err := e.profileStore.SetDefaultProfile(profile.ID); err != nil {
+			return contracts.ProfileStatus{}, err
+		}
+	}
+	return status, nil
 }
 
 func (e *InMemoryEngine) GetSessionSummary(_ context.Context, sessionID string) (contracts.SessionSummary, error) {
@@ -1179,4 +1187,28 @@ func (e *InMemoryEngine) resolveProfile(profileID string, model string) (contrac
 		return e.profileStore.ResolveProfile(profileID, model)
 	}
 	return provider.ResolveSessionProfile(profileID, model), nil
+}
+
+func (e *InMemoryEngine) buildProfileStatus(ctx context.Context, profile contracts.AuthProfile) (contracts.ProfileStatus, error) {
+	status := contracts.ProfileStatus{
+		Profile: profile,
+		Validation: contracts.ProfileValidationResult{
+			Valid:   true,
+			Message: "profile is valid",
+		},
+	}
+
+	if e.providers != nil {
+		validation, err := e.providers.ValidateProfile(ctx, profile)
+		if err != nil {
+			return contracts.ProfileStatus{}, err
+		}
+		status.Validation = validation
+
+		models, err := e.providers.ListModels(ctx, profile)
+		if err == nil {
+			status.Models = models
+		}
+	}
+	return status, nil
 }

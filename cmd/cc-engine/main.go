@@ -12,6 +12,7 @@ import (
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/engine"
+	"github.com/cdossman/klaude-kode/internal/provider"
 	"github.com/cdossman/klaude-kode/internal/transport"
 )
 
@@ -27,12 +28,22 @@ type config struct {
 	Transport       string
 	Format          outputFormat
 	ListProfiles    bool
+	UpsertProfile   bool
 	Prompt          string
 	SessionID       string
 	ResumeSessionID string
 	CWD             string
 	ProfileID       string
 	Model           string
+	ProfileProvider string
+	ProfileKind     string
+	DisplayName     string
+	DefaultModel    string
+	CredentialRef   string
+	APIBase         string
+	OAuthHost       string
+	AccountScope    string
+	MakeDefault     bool
 	StateRoot       string
 }
 
@@ -78,6 +89,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
 	}
+	if cfg.UpsertProfile {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-upsert-profile does not support -format=events")
+		}
+		return upsertProfileAndRenderCatalog(ctx, runtime, cfg, stdout)
+	}
 
 	if cfg.Transport == "stdio" {
 		if cfg.Format != outputFormatEvents {
@@ -108,12 +125,22 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	transportValue := fs.String("transport", "headless", "engine transport: headless, stdio")
 	formatValue := fs.String("format", string(outputFormatJSON), "output format: json, text, events")
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
+	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc-engine", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "engine-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
 	cwdValue := fs.String("cwd", mustGetwd(), "session working directory")
 	profileIDValue := fs.String("profile-id", "", "active auth profile id")
 	modelValue := fs.String("model", "", "active model id")
+	profileProviderValue := fs.String("provider", "", "profile provider kind for -upsert-profile")
+	profileKindValue := fs.String("profile-kind", "", "profile auth kind for -upsert-profile")
+	displayNameValue := fs.String("display-name", "", "display name for -upsert-profile")
+	defaultModelValue := fs.String("default-model", "", "default model for -upsert-profile")
+	credentialRefValue := fs.String("credential-ref", "", "credential reference for -upsert-profile")
+	apiBaseValue := fs.String("api-base", "", "provider API base for -upsert-profile")
+	oauthHostValue := fs.String("oauth-host", "", "oauth host for anthropic_oauth profiles")
+	accountScopeValue := fs.String("account-scope", "", "account scope for anthropic_oauth profiles")
+	makeDefaultValue := fs.Bool("make-default", false, "set the upserted profile as the default profile")
 	stateRootValue := fs.String("state-root", engine.DefaultStateRoot(), "engine state root")
 
 	if err := fs.Parse(args); err != nil {
@@ -138,12 +165,22 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		Transport:       transportMode,
 		Format:          format,
 		ListProfiles:    *listProfilesValue,
+		UpsertProfile:   *upsertProfileValue,
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
 		CWD:             strings.TrimSpace(*cwdValue),
 		ProfileID:       strings.TrimSpace(*profileIDValue),
 		Model:           strings.TrimSpace(*modelValue),
+		ProfileProvider: strings.TrimSpace(*profileProviderValue),
+		ProfileKind:     strings.TrimSpace(*profileKindValue),
+		DisplayName:     strings.TrimSpace(*displayNameValue),
+		DefaultModel:    strings.TrimSpace(*defaultModelValue),
+		CredentialRef:   strings.TrimSpace(*credentialRefValue),
+		APIBase:         strings.TrimSpace(*apiBaseValue),
+		OAuthHost:       strings.TrimSpace(*oauthHostValue),
+		AccountScope:    strings.TrimSpace(*accountScopeValue),
+		MakeDefault:     *makeDefaultValue,
 		StateRoot:       strings.TrimSpace(*stateRootValue),
 	}, nil
 }
@@ -377,6 +414,17 @@ func renderProfileCatalog(ctx context.Context, runtime engine.Engine, format out
 	}
 }
 
+func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	profile, err := buildProfileFromConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if _, err := runtime.SaveProfile(ctx, profile, cfg.MakeDefault); err != nil {
+		return err
+	}
+	return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatText:
@@ -413,6 +461,123 @@ func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) er
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
+}
+
+func buildProfileFromConfig(cfg config) (contracts.AuthProfile, error) {
+	profileID := strings.TrimSpace(cfg.ProfileID)
+	if profileID == "" {
+		return contracts.AuthProfile{}, fmt.Errorf("-profile-id is required for -upsert-profile")
+	}
+
+	profileKind, providerKind, err := resolveProfileKinds(cfg)
+	if err != nil {
+		return contracts.AuthProfile{}, err
+	}
+
+	defaultModel := strings.TrimSpace(cfg.DefaultModel)
+	if defaultModel == "" {
+		defaultModel = defaultModelForProvider(providerKind)
+	}
+
+	displayName := strings.TrimSpace(cfg.DisplayName)
+	if displayName == "" {
+		displayName = profileID
+	}
+
+	settings := map[string]string{}
+	if credentialRef := strings.TrimSpace(cfg.CredentialRef); credentialRef != "" {
+		settings["credential_ref"] = credentialRef
+	}
+
+	switch profileKind {
+	case contracts.AuthProfileAnthropicOAuth:
+		oauthHost := strings.TrimSpace(cfg.OAuthHost)
+		if oauthHost == "" {
+			oauthHost = "https://claude.ai"
+		}
+		accountScope := strings.TrimSpace(cfg.AccountScope)
+		if accountScope == "" {
+			accountScope = "claude"
+		}
+		settings["oauth_host"] = oauthHost
+		settings["account_scope"] = accountScope
+	case contracts.AuthProfileOpenRouterAPIKey:
+		apiBase := strings.TrimSpace(cfg.APIBase)
+		if apiBase == "" {
+			apiBase = "https://openrouter.ai/api/v1"
+		}
+		settings["api_base"] = apiBase
+		settings["app_name"] = "Klaude Kode"
+		settings["http_referer"] = "https://local.cli"
+	}
+
+	return contracts.AuthProfile{
+		ID:           profileID,
+		Kind:         profileKind,
+		Provider:     providerKind,
+		DisplayName:  displayName,
+		DefaultModel: defaultModel,
+		Settings:     settings,
+	}, nil
+}
+
+func resolveProfileKinds(cfg config) (contracts.AuthProfileKind, contracts.ProviderKind, error) {
+	profileKind := contracts.AuthProfileKind(strings.TrimSpace(cfg.ProfileKind))
+	providerKind := contracts.ProviderKind(strings.TrimSpace(cfg.ProfileProvider))
+
+	if providerKind == "" {
+		switch profileKind {
+		case contracts.AuthProfileAnthropicOAuth, contracts.AuthProfileAnthropicAPIKey:
+			providerKind = contracts.ProviderAnthropic
+		case contracts.AuthProfileOpenRouterAPIKey:
+			providerKind = contracts.ProviderOpenRouter
+		default:
+			providerKind = provider.ResolveSessionProfile(cfg.ProfileID, cfg.DefaultModel).Provider
+		}
+	}
+
+	if profileKind == "" {
+		switch providerKind {
+		case contracts.ProviderOpenRouter:
+			profileKind = contracts.AuthProfileOpenRouterAPIKey
+		case contracts.ProviderAnthropic:
+			profileKind = contracts.AuthProfileAnthropicAPIKey
+		default:
+			return "", "", fmt.Errorf("unsupported provider %q", providerKind)
+		}
+	}
+
+	switch providerKind {
+	case contracts.ProviderAnthropic, contracts.ProviderOpenRouter:
+	default:
+		return "", "", fmt.Errorf("unsupported provider %q", providerKind)
+	}
+
+	switch profileKind {
+	case contracts.AuthProfileAnthropicOAuth, contracts.AuthProfileAnthropicAPIKey, contracts.AuthProfileOpenRouterAPIKey:
+	default:
+		return "", "", fmt.Errorf("unsupported profile kind %q", profileKind)
+	}
+
+	if providerKind == contracts.ProviderOpenRouter && profileKind != contracts.AuthProfileOpenRouterAPIKey {
+		return "", "", fmt.Errorf("openrouter profiles must use kind %q", contracts.AuthProfileOpenRouterAPIKey)
+	}
+	if providerKind == contracts.ProviderAnthropic && profileKind == contracts.AuthProfileOpenRouterAPIKey {
+		return "", "", fmt.Errorf("anthropic profiles cannot use kind %q", contracts.AuthProfileOpenRouterAPIKey)
+	}
+
+	return profileKind, providerKind, nil
+}
+
+func defaultModelForProvider(kind contracts.ProviderKind) string {
+	switch kind {
+	case contracts.ProviderOpenRouter:
+		return "openrouter/auto"
+	case contracts.ProviderAnthropic:
+		fallthrough
+	default:
+		return "claude-sonnet-4-6"
+	}
 }
 
 func renderText(stdout io.Writer, sessionResult result) error {
