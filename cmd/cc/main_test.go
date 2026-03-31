@@ -310,6 +310,47 @@ func TestRunReplayEvalText(t *testing.T) {
 	}
 }
 
+func TestRunSummarizeRunsText(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	successReplay := writeReplayPack(t, t.TempDir(), contracts.TerminalOutcomeSuccess)
+	failedReplay := writeReplayPack(t, t.TempDir(), contracts.TerminalOutcomeTaskFailure)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	for _, replayPath := range []string{successReplay, failedReplay} {
+		stdout.Reset()
+		stderr.Reset()
+		if err := run([]string{
+			"-run-replay-eval",
+			"-cwd=" + candidateRoot,
+			"-replay-path=" + replayPath,
+		}, &stdout, &stderr); err != nil {
+			t.Fatalf("replay eval run returned error: %v", err)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	if err := run([]string{
+		"-summarize-runs",
+		"-cwd=" + candidateRoot,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("summarize runs returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc run summary") {
+		t.Fatalf("expected run summary header, got %q", output)
+	}
+	if !strings.Contains(output, "total_runs: 2") {
+		t.Fatalf("expected total_runs in summary output, got %q", output)
+	}
+	if !strings.Contains(output, "failure_codes: replay_terminal_outcome=1") {
+		t.Fatalf("expected failure code summary, got %q", output)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 

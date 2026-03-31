@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
@@ -31,6 +32,7 @@ type config struct {
 	ExportReplayPack  bool
 	ValidateCandidate bool
 	RunReplayEval     bool
+	SummarizeRuns     bool
 	Prompt            string
 	SessionID         string
 	ResumeSessionID   string
@@ -122,6 +124,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return renderCandidateValidation(cfg, stdout)
 	}
+	if cfg.SummarizeRuns {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-summarize-runs does not support -format=events")
+		}
+		return renderRunSummary(cfg, stdout)
+	}
 	if cfg.RunReplayEval {
 		if cfg.Format == outputFormatEvents {
 			return fmt.Errorf("-run-replay-eval does not support -format=events")
@@ -150,6 +158,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
 	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
+	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
 	runReplayEvalValue := fs.Bool("run-replay-eval", false, "run a replay evaluation for the current candidate root and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "cc-bootstrap", "session identifier")
@@ -178,6 +187,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ShowStatus:        *showStatusValue,
 		ExportReplayPack:  *exportReplayPackValue,
 		ValidateCandidate: *validateCandidateValue,
+		SummarizeRuns:     *summarizeRunsValue,
 		RunReplayEval:     *runReplayEvalValue,
 		Prompt:            strings.TrimSpace(*promptValue),
 		SessionID:         strings.TrimSpace(*sessionIDValue),
@@ -470,6 +480,24 @@ func renderReplayEval(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderRunSummary(cfg config, stdout io.Writer) error {
+	summary, err := harness.SummarizeIndexedEvalRuns(harness.DefaultArtifactRoot(cfg.CWD))
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(summary)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderRunSummaryText(stdout, summary)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatEvents:
@@ -608,6 +636,33 @@ func renderReplayEvalText(stdout io.Writer, run harness.EvalRun) error {
 		lines = append(lines, fmt.Sprintf("failure_code: %s", run.Failure.Code))
 		lines = append(lines, fmt.Sprintf("failure_message: %s", run.Failure.Message))
 		lines = append(lines, fmt.Sprintf("retryable: %t", run.Failure.Retryable))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderRunSummaryText(stdout io.Writer, summary harness.EvalRunSummary) error {
+	lines := []string{
+		"cc run summary",
+		fmt.Sprintf("artifact_root: %s", summary.ArtifactRoot),
+		fmt.Sprintf("total_runs: %d", summary.TotalRuns),
+		fmt.Sprintf("completed: %d", summary.Completed),
+		fmt.Sprintf("failed: %d", summary.Failed),
+		fmt.Sprintf("average_score: %.2f", summary.AverageScore),
+		fmt.Sprintf("latest_run: %s", summary.LatestRunID),
+		fmt.Sprintf("latest_status: %s", summary.LatestStatus),
+	}
+	if len(summary.FailureCodes) > 0 {
+		keys := make([]string, 0, len(summary.FailureCodes))
+		for code := range summary.FailureCodes {
+			keys = append(keys, code)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, code := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%d", code, summary.FailureCodes[code]))
+		}
+		lines = append(lines, fmt.Sprintf("failure_codes: %s", strings.Join(parts, ", ")))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
