@@ -30,6 +30,7 @@ type config struct {
 	ShowStatus        bool
 	ExportReplayPack  bool
 	ValidateCandidate bool
+	RunReplayEval     bool
 	Prompt            string
 	SessionID         string
 	ResumeSessionID   string
@@ -37,6 +38,7 @@ type config struct {
 	ProfileID         string
 	Model             string
 	StateRoot         string
+	ReplayPath        string
 }
 
 type result struct {
@@ -120,6 +122,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return renderCandidateValidation(cfg, stdout)
 	}
+	if cfg.RunReplayEval {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-run-replay-eval does not support -format=events")
+		}
+		return renderReplayEval(cfg, stdout)
+	}
 	if cfg.ResumeSessionID != "" {
 		return renderPersistedSession(ctx, runtime, cfg, stdout)
 	}
@@ -142,6 +150,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
 	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
+	runReplayEvalValue := fs.Bool("run-replay-eval", false, "run a replay evaluation for the current candidate root and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "cc-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -149,6 +158,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	profileIDValue := fs.String("profile-id", "", "active auth profile id")
 	modelValue := fs.String("model", "", "active model id")
 	stateRootValue := fs.String("state-root", engine.DefaultStateRoot(), "engine state root")
+	replayPathValue := fs.String("replay-path", "", "path to a replay pack file for harness evaluation")
 
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -168,6 +178,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ShowStatus:        *showStatusValue,
 		ExportReplayPack:  *exportReplayPackValue,
 		ValidateCandidate: *validateCandidateValue,
+		RunReplayEval:     *runReplayEvalValue,
 		Prompt:            strings.TrimSpace(*promptValue),
 		SessionID:         strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID:   strings.TrimSpace(*resumeSessionValue),
@@ -175,6 +186,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ProfileID:         strings.TrimSpace(*profileIDValue),
 		Model:             strings.TrimSpace(*modelValue),
 		StateRoot:         strings.TrimSpace(*stateRootValue),
+		ReplayPath:        strings.TrimSpace(*replayPathValue),
 	}, nil
 }
 
@@ -433,6 +445,28 @@ func renderCandidateValidation(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderReplayEval(cfg config, stdout io.Writer) error {
+	if cfg.ReplayPath == "" {
+		return fmt.Errorf("a replay path is required for -run-replay-eval")
+	}
+
+	run, err := harness.RunReplayEval(cfg.CWD, cfg.ReplayPath)
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(run)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderReplayEvalText(stdout, run)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatEvents:
@@ -553,6 +587,24 @@ func renderCandidateValidationText(stdout io.Writer, result harness.CandidateVal
 		for _, issue := range result.Issues {
 			lines = append(lines, "  - "+issue)
 		}
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderReplayEvalText(stdout io.Writer, run harness.EvalRun) error {
+	lines := []string{
+		"cc replay eval",
+		fmt.Sprintf("run: %s", run.ID),
+		fmt.Sprintf("candidate_root: %s", run.Candidate.Root),
+		fmt.Sprintf("replay_path: %s", run.ReplayPath),
+		fmt.Sprintf("status: %s", run.Status),
+		fmt.Sprintf("score: %.2f", run.Score),
+	}
+	if run.Failure != nil {
+		lines = append(lines, fmt.Sprintf("failure_code: %s", run.Failure.Code))
+		lines = append(lines, fmt.Sprintf("failure_message: %s", run.Failure.Message))
+		lines = append(lines, fmt.Sprintf("retryable: %t", run.Failure.Retryable))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
