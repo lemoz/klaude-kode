@@ -28,3 +28,9 @@ type EvalRun struct {
 	Score         float64             `json:"score"`
 	Failure       *EvalFailureSummary `json:"failure"`
 }
+
+type CandidateValidationResult struct {
+	Valid     bool            `json:"valid"`
+	Issues    []string        `json:"issues"`
+	Candidate CandidateBundle `json:"candidate"`
+}
