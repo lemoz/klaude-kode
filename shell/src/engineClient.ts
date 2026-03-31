@@ -300,6 +300,38 @@ export async function loginOpenRouter(
   return parsed.profiles ?? [];
 }
 
+export async function loginAnthropic(
+  config: Pick<ShellConfig, "stateRoot">,
+  input: {
+    credential: string;
+    defaultModel?: string;
+    apiBase?: string;
+  },
+): Promise<ProfileStatus[]> {
+  const args = [
+    "-format=json",
+    "-upsert-profile",
+    "-profile-id=anthropic-api",
+    "-provider=anthropic",
+    "-profile-kind=anthropic_api_key",
+    "-display-name=Anthropic API",
+    `-credential-ref=${normalizeCredentialRef(input.credential)}`,
+    "-make-default",
+    `-state-root=${config.stateRoot}`,
+  ];
+
+  if (input.defaultModel && input.defaultModel.trim() !== "") {
+    args.push(`-default-model=${input.defaultModel.trim()}`);
+  }
+  if (input.apiBase && input.apiBase.trim() !== "") {
+    args.push(`-api-base=${input.apiBase.trim()}`);
+  }
+
+  const stdout = await runEngineAdminCommand(args);
+  const parsed = JSON.parse(stdout) as { profiles?: ProfileStatus[] };
+  return parsed.profiles ?? [];
+}
+
 function buildEngineArgs(config: ShellConfig): string[] {
   const args = [
     "run",

@@ -6,6 +6,7 @@ import {
   defaultShellConfig,
   makeCloseSessionCommand,
   makeDenyPermissionCommand,
+  loginAnthropic,
   listProfiles,
   loginOpenRouter,
   makeUpdateSessionSettingCommand,
@@ -177,6 +178,20 @@ async function runInteractiveLoop(
           renderProfiles(ui, profiles);
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "openrouter-main"));
+          await ui.waitForDecision(decisionVersion);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "login_anthropic") {
+          const profiles = await loginAnthropic(config, {
+            credential: slashCommand.credential,
+            defaultModel: slashCommand.defaultModel,
+            apiBase: slashCommand.apiBase,
+          });
+          ui.writeLine("login: saved anthropic-api and set it as default");
+          renderProfiles(ui, profiles);
+          const decisionVersion = ui.decisionVersion();
+          await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-api"));
           await ui.waitForDecision(decisionVersion);
           ui.showPrompt(ui.currentPrompt());
           continue;
@@ -377,6 +392,7 @@ function parseSlashCommand(
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
   | { kind: "profiles" }
   | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
+  | { kind: "login_anthropic"; credential: string; defaultModel?: string; apiBase?: string }
   | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith("/")) {
@@ -406,19 +422,22 @@ function parseSlashCommand(
 
 function parseLoginCommand(
   line: string,
-): { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string } | null {
+):
+  | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
+  | { kind: "login_anthropic"; credential: string; defaultModel?: string; apiBase?: string }
+  | null {
   const parts = line.split(/\s+/).slice(1);
   if (parts.length < 2) {
-    throw new Error("usage: /login openrouter <env-var|credential-ref> [model=<id>] [api_base=<url>]");
+    throw new Error("usage: /login <openrouter|anthropic> <env-var|credential-ref> [model=<id>] [api_base=<url>]");
   }
   const provider = parts[0]?.toLowerCase();
-  if (provider !== "openrouter") {
+  if (provider !== "openrouter" && provider !== "anthropic") {
     throw new Error(`unsupported login provider: ${parts[0]}`);
   }
 
   const credential = parts[1] ?? "";
   if (credential.trim() === "") {
-    throw new Error("usage: /login openrouter <env-var|credential-ref> [model=<id>] [api_base=<url>]");
+    throw new Error("usage: /login <openrouter|anthropic> <env-var|credential-ref> [model=<id>] [api_base=<url>]");
   }
 
   let defaultModel: string | undefined;
@@ -433,6 +452,15 @@ function parseLoginCommand(
       continue;
     }
     throw new Error(`unsupported login option: ${token}`);
+  }
+
+  if (provider === "anthropic") {
+    return {
+      kind: "login_anthropic",
+      credential,
+      defaultModel,
+      apiBase,
+    };
   }
 
   return {
@@ -479,6 +507,7 @@ function printHelp(): void {
     "  /profiles",
     "  /profile <id>",
     "  /model <id>",
+    "  /login anthropic <env-var|credential-ref> [model=<id>] [api_base=<url>]",
     "  /login openrouter <env-var|credential-ref> [model=<id>] [api_base=<url>]",
   ];
   console.log(help.join("\n"));
