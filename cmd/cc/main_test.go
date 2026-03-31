@@ -351,6 +351,49 @@ func TestRunSummarizeRunsText(t *testing.T) {
 	}
 }
 
+func TestRunShowRunText(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	replayPath := writeReplayPack(t, t.TempDir(), contracts.TerminalOutcomeSuccess)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-format=json",
+		"-run-replay-eval",
+		"-cwd=" + candidateRoot,
+		"-replay-path=" + replayPath,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("replay eval run returned error: %v", err)
+	}
+
+	var created harness.EvalRun
+	if err := json.Unmarshal(stdout.Bytes(), &created); err != nil {
+		t.Fatalf("failed to parse created run output: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	if err := run([]string{
+		"-show-run",
+		"-cwd=" + candidateRoot,
+		"-run-id=" + created.ID,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("show run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc replay run") {
+		t.Fatalf("expected replay run header, got %q", output)
+	}
+	if !strings.Contains(output, "run: "+created.ID) {
+		t.Fatalf("expected run id in replay run output, got %q", output)
+	}
+	if !strings.Contains(output, "status: completed") {
+		t.Fatalf("expected completed status in replay run output, got %q", output)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 
