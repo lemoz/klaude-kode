@@ -1,0 +1,15 @@
+{
+  "name": "klaude-kode-shell",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "dev": "tsx src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  }
+}
