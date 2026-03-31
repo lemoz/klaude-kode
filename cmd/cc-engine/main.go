@@ -31,6 +31,7 @@ type config struct {
 	ListProfiles        bool
 	ListModels          bool
 	ShowStatus          bool
+	ExportReplayPack    bool
 	UpsertProfile       bool
 	AnthropicOAuthLogin bool
 	LogoutProfileID     string
@@ -123,6 +124,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return renderSessionStatus(ctx, runtime, cfg, stdout)
 	}
+	if cfg.ExportReplayPack {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-export-replay-pack does not support -format=events")
+		}
+		return renderReplayPack(ctx, runtime, cfg, stdout)
+	}
 	if cfg.UpsertProfile {
 		if cfg.Format == outputFormatEvents {
 			return fmt.Errorf("-upsert-profile does not support -format=events")
@@ -173,6 +180,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
+	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
 	logoutProfileValue := fs.String("logout-profile", "", "clear stored auth from the specified profile and exit")
@@ -218,6 +226,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ListProfiles:        *listProfilesValue,
 		ListModels:          *listModelsValue,
 		ShowStatus:          *showStatusValue,
+		ExportReplayPack:    *exportReplayPackValue,
 		UpsertProfile:       *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
 		LogoutProfileID:     strings.TrimSpace(*logoutProfileValue),
@@ -536,6 +545,32 @@ func renderSessionStatus(ctx context.Context, runtime engine.Engine, cfg config,
 	}
 }
 
+func renderReplayPack(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	sessionID := strings.TrimSpace(cfg.ResumeSessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(cfg.SessionID)
+	}
+	if sessionID == "" {
+		return fmt.Errorf("a session id is required for -export-replay-pack")
+	}
+
+	pack, err := engine.ExportReplayPack(ctx, runtime, sessionID)
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderReplayPackText(stdout, pack)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(pack)
+	}
+}
+
 func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
 	profile, err := buildProfileFromConfig(cfg)
 	if err != nil {
@@ -670,6 +705,21 @@ func renderSessionStatusText(stdout io.Writer, result sessionStatusResult) error
 	}
 	if result.Summary.ClosedReason != "" {
 		lines = append(lines, fmt.Sprintf("closed_reason: %s", result.Summary.ClosedReason))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderReplayPackText(stdout io.Writer, pack contracts.ReplayPack) error {
+	lines := []string{
+		"cc-engine replay pack",
+		fmt.Sprintf("session: %s", pack.Session.SessionID),
+		fmt.Sprintf("mode: %s", pack.Summary.Mode),
+		fmt.Sprintf("status: %s", pack.Summary.Status),
+		fmt.Sprintf("profile: %s", pack.Summary.ProfileID),
+		fmt.Sprintf("model: %s", pack.Summary.Model),
+		fmt.Sprintf("events: %d", len(pack.Events)),
+		fmt.Sprintf("terminal_outcome: %s", pack.Summary.TerminalOutcome),
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err

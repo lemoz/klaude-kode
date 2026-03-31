@@ -225,6 +225,49 @@ func TestRunStatusJSON(t *testing.T) {
 	}
 }
 
+func TestRunExportReplayPackJSON(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state-root")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-format=json",
+		"-prompt=replay seed",
+		"-session-id=replay-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("seed run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-format=json",
+		"-export-replay-pack",
+		"-resume-session=replay-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("export replay run returned error: %v", err)
+	}
+
+	var got contracts.ReplayPack
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse replay pack output: %v", err)
+	}
+	if got.Session.SessionID != "replay-target" {
+		t.Fatalf("expected replay-target session, got %s", got.Session.SessionID)
+	}
+	if got.Summary.Status != contracts.SessionStatusClosed {
+		t.Fatalf("expected closed summary in replay pack, got %s", got.Summary.Status)
+	}
+	if len(got.Events) == 0 {
+		t.Fatalf("expected replay pack events")
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
