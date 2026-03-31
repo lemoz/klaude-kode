@@ -2,6 +2,8 @@ package contracts
 
 import "time"
 
+const SchemaVersionV1 = "v1"
+
 type SessionMode string
 
 const (
@@ -11,37 +13,139 @@ const (
 	SessionModeViewer      SessionMode = "viewer"
 )
 
+type SessionStatus string
+
+const (
+	SessionStatusActive SessionStatus = "active"
+	SessionStatusClosed SessionStatus = "closed"
+)
+
 type ProviderKind string
 
 const (
-	ProviderAnthropic ProviderKind = "anthropic"
+	ProviderAnthropic  ProviderKind = "anthropic"
 	ProviderOpenRouter ProviderKind = "openrouter"
 )
 
 type AuthProfileKind string
 
 const (
-	AuthProfileAnthropicOAuth AuthProfileKind = "anthropic_oauth"
-	AuthProfileAnthropicAPIKey AuthProfileKind = "anthropic_api_key"
+	AuthProfileAnthropicOAuth   AuthProfileKind = "anthropic_oauth"
+	AuthProfileAnthropicAPIKey  AuthProfileKind = "anthropic_api_key"
 	AuthProfileOpenRouterAPIKey AuthProfileKind = "openrouter_api_key"
 )
 
+type CommandKind string
+
+const (
+	CommandKindUserInput            CommandKind = "user_input"
+	CommandKindCancelTurn           CommandKind = "cancel_turn"
+	CommandKindApprovePermission    CommandKind = "approve_permission"
+	CommandKindDenyPermission       CommandKind = "deny_permission"
+	CommandKindUpdateSessionSetting CommandKind = "update_session_setting"
+	CommandKindExecuteSlashCommand  CommandKind = "execute_slash_command"
+	CommandKindAttachViewer         CommandKind = "attach_viewer"
+	CommandKindDetachViewer         CommandKind = "detach_viewer"
+	CommandKindRefreshMCP           CommandKind = "refresh_mcp"
+	CommandKindCloseSession         CommandKind = "close_session"
+)
+
+type EventKind string
+
+const (
+	EventKindSessionStarted      EventKind = "session_started"
+	EventKindLifecycle           EventKind = "lifecycle"
+	EventKindUserMessageAccepted EventKind = "user_message_accepted"
+	EventKindSessionState        EventKind = "session_state"
+	EventKindWarning             EventKind = "warning"
+	EventKindFailure             EventKind = "failure"
+	EventKindSessionClosed       EventKind = "session_closed"
+)
+
+type MessageSource string
+
+const (
+	MessageSourceInteractive MessageSource = "interactive"
+	MessageSourcePrint       MessageSource = "print"
+	MessageSourceRemote      MessageSource = "remote"
+	MessageSourceReplay      MessageSource = "replay"
+)
+
+type TerminalOutcome string
+
+const (
+	TerminalOutcomeNone                TerminalOutcome = ""
+	TerminalOutcomeSuccess             TerminalOutcome = "success"
+	TerminalOutcomeTaskFailure         TerminalOutcome = "task_failure"
+	TerminalOutcomeToolFailure         TerminalOutcome = "tool_failure"
+	TerminalOutcomeProviderFailure     TerminalOutcome = "provider_failure"
+	TerminalOutcomeBudgetExhausted     TerminalOutcome = "budget_exhausted"
+	TerminalOutcomeValidationFailure   TerminalOutcome = "validation_failure"
+	TerminalOutcomeEnvironmentMismatch TerminalOutcome = "environment_mismatch"
+)
+
+type FailureCategory string
+
+const (
+	FailureCategoryProvider   FailureCategory = "provider"
+	FailureCategoryTool       FailureCategory = "tool"
+	FailureCategoryPermission FailureCategory = "permission"
+	FailureCategoryTransport  FailureCategory = "transport"
+	FailureCategoryAuth       FailureCategory = "auth"
+	FailureCategoryMCP        FailureCategory = "mcp"
+	FailureCategoryReplay     FailureCategory = "replay"
+)
+
 type StartSessionRequest struct {
-	SessionID string
-	CWD       string
-	Mode      SessionMode
-	ProfileID string
-	Model     string
+	SessionID string      `json:"session_id"`
+	CWD       string      `json:"cwd"`
+	Mode      SessionMode `json:"mode"`
+	ProfileID string      `json:"profile_id"`
+	Model     string      `json:"model"`
+	Title     string      `json:"title"`
 }
 
 type ResumeSessionRequest struct {
-	SessionID string
+	SessionID string `json:"session_id"`
 }
 
 type SessionHandle struct {
-	SessionID string
-	CWD       string
-	Mode      SessionMode
+	SessionID string      `json:"session_id"`
+	CWD       string      `json:"cwd"`
+	Mode      SessionMode `json:"mode"`
+	ProfileID string      `json:"profile_id"`
+	Model     string      `json:"model"`
+	CreatedAt time.Time   `json:"created_at"`
+}
+
+type SessionSummary struct {
+	SessionID       string          `json:"session_id"`
+	CWD             string          `json:"cwd"`
+	Mode            SessionMode     `json:"mode"`
+	Status          SessionStatus   `json:"status"`
+	ProfileID       string          `json:"profile_id"`
+	Model           string          `json:"model"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	EventCount      int             `json:"event_count"`
+	TurnCount       int             `json:"turn_count"`
+	LastSequence    int64           `json:"last_sequence"`
+	LastEventKind   EventKind       `json:"last_event_kind"`
+	ClosedReason    string          `json:"closed_reason"`
+	TerminalOutcome TerminalOutcome `json:"terminal_outcome"`
+}
+
+type SessionStateSnapshot struct {
+	CWD             string          `json:"cwd"`
+	Mode            SessionMode     `json:"mode"`
+	Status          SessionStatus   `json:"status"`
+	ProfileID       string          `json:"profile_id"`
+	Model           string          `json:"model"`
+	EventCount      int             `json:"event_count"`
+	TurnCount       int             `json:"turn_count"`
+	LastSequence    int64           `json:"last_sequence"`
+	ClosedReason    string          `json:"closed_reason"`
+	TerminalOutcome TerminalOutcome `json:"terminal_outcome"`
 }
 
 type ToolChoice string
@@ -52,49 +156,81 @@ const (
 )
 
 type SessionCommand struct {
-	CommandID string
-	Kind      string
-	Payload   map[string]any
+	SchemaVersion string                `json:"schema_version"`
+	CommandID     string                `json:"command_id"`
+	Kind          CommandKind           `json:"kind"`
+	Timestamp     time.Time             `json:"timestamp"`
+	Payload       SessionCommandPayload `json:"payload"`
+}
+
+type SessionCommandPayload struct {
+	TurnID       string            `json:"turn_id"`
+	Source       MessageSource     `json:"source"`
+	Text         string            `json:"text"`
+	Name         string            `json:"name"`
+	Args         []string          `json:"args"`
+	SettingKey   string            `json:"setting_key"`
+	SettingValue string            `json:"setting_value"`
+	Reason       string            `json:"reason"`
+	Metadata     map[string]string `json:"metadata"`
 }
 
 type SessionEvent struct {
-	SchemaVersion string
-	SessionID     string
-	Sequence      int64
-	Timestamp     time.Time
-	Kind          string
-	Payload       map[string]any
+	SchemaVersion string              `json:"schema_version"`
+	SessionID     string              `json:"session_id"`
+	Sequence      int64               `json:"sequence"`
+	Timestamp     time.Time           `json:"timestamp"`
+	Kind          EventKind           `json:"kind"`
+	Payload       SessionEventPayload `json:"payload"`
+}
+
+type SessionEventPayload struct {
+	CommandID string                `json:"command_id"`
+	TurnID    string                `json:"turn_id"`
+	Source    MessageSource         `json:"source"`
+	Message   *CanonicalMessage     `json:"message"`
+	State     *SessionStateSnapshot `json:"state"`
+	Warning   string                `json:"warning"`
+	Failure   *FailurePayload       `json:"failure"`
+	Reason    string                `json:"reason"`
+}
+
+type FailurePayload struct {
+	Category  FailureCategory `json:"category"`
+	Code      string          `json:"code"`
+	Message   string          `json:"message"`
+	Retryable bool            `json:"retryable"`
 }
 
 type CanonicalMessage struct {
-	Role    string
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type CompletionRequest struct {
-	TurnID       string
-	Model        string
-	Messages     []CanonicalMessage
-	SystemPrompt []string
-	ToolChoice   ToolChoice
+	TurnID       string             `json:"turn_id"`
+	Model        string             `json:"model"`
+	Messages     []CanonicalMessage `json:"messages"`
+	SystemPrompt []string           `json:"system_prompt"`
+	ToolChoice   ToolChoice         `json:"tool_choice"`
 }
 
 type CompletionResult struct {
-	Message CanonicalMessage
+	Message CanonicalMessage `json:"message"`
 }
 
 type TokenCountRequest struct {
-	Model    string
-	Messages []CanonicalMessage
+	Model    string             `json:"model"`
+	Messages []CanonicalMessage `json:"messages"`
 }
 
 type TokenCountResult struct {
-	InputTokens int
+	InputTokens int `json:"input_tokens"`
 }
 
 type ProviderEvent struct {
-	Kind    string
-	Payload map[string]any
+	Kind    string         `json:"kind"`
+	Payload map[string]any `json:"payload"`
 }
 
 type CapabilitySet struct {
@@ -110,48 +246,49 @@ type CapabilitySet struct {
 }
 
 type AuthProfile struct {
-	ID           string
-	Kind         AuthProfileKind
-	Provider     ProviderKind
-	DisplayName  string
-	DefaultModel string
-	Settings     map[string]string
+	ID           string            `json:"id"`
+	Kind         AuthProfileKind   `json:"kind"`
+	Provider     ProviderKind      `json:"provider"`
+	DisplayName  string            `json:"display_name"`
+	DefaultModel string            `json:"default_model"`
+	Settings     map[string]string `json:"settings"`
 }
 
 type ProfileValidationResult struct {
-	Valid   bool
-	Message string
+	Valid   bool   `json:"valid"`
+	Message string `json:"message"`
 }
 
 type ToolDescriptor struct {
-	Name             string
-	Description      string
-	ConcurrencyClass string
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	ConcurrencyClass string `json:"concurrency_class"`
 }
 
 type ToolCall struct {
-	ID    string
-	Name  string
-	Input map[string]any
+	ID    string         `json:"id"`
+	Name  string         `json:"name"`
+	Input map[string]any `json:"input"`
 }
 
 type ToolEvent struct {
-	Kind    string
-	Payload map[string]any
+	Kind    string         `json:"kind"`
+	Payload map[string]any `json:"payload"`
 }
 
 type ResourceSnapshot struct {
-	Resources []string
+	Resources []string `json:"resources"`
 }
 
 type SessionContext struct {
-	SessionID string
-	CWD       string
-	Mode      SessionMode
+	SessionID string      `json:"session_id"`
+	CWD       string      `json:"cwd"`
+	Mode      SessionMode `json:"mode"`
+	ProfileID string      `json:"profile_id"`
+	Model     string      `json:"model"`
 }
 
 type TransportTarget struct {
-	Kind string
-	Addr string
+	Kind string `json:"kind"`
+	Addr string `json:"addr"`
 }
-
