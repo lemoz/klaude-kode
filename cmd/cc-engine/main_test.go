@@ -189,3 +189,58 @@ func TestRunToolPromptIncludesPermissionAndToolEvents(t *testing.T) {
 		t.Fatalf("expected final event session_closed, got %s", got.Events[len(got.Events)-1].Kind)
 	}
 }
+
+func TestRunStdioTransportStreamsInteractiveSession(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	stdin := strings.NewReader(strings.Join([]string{
+		`{"kind":"user_input","payload":{"text":"hello over stdio"}}`,
+		`{"kind":"close_session","payload":{"reason":"stdio_test_complete"}}`,
+		"",
+	}, "\n"))
+
+	err := runWithInput([]string{
+		"-transport=stdio",
+		"-format=events",
+		"-session-id=stdio-session",
+		"-state-root=" + root,
+	}, stdin, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runWithInput returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 9 {
+		t.Fatalf("expected 9 stdio events, got %d", len(lines))
+	}
+
+	var got []contracts.SessionEvent
+	for _, line := range lines {
+		var event contracts.SessionEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("failed to parse stdio event line %q: %v", line, err)
+		}
+		got = append(got, event)
+	}
+
+	if got[0].Kind != contracts.EventKindSessionStarted {
+		t.Fatalf("expected first event session_started, got %s", got[0].Kind)
+	}
+	if got[2].Kind != contracts.EventKindUserMessageAccepted {
+		t.Fatalf("expected user_message_accepted, got %s", got[2].Kind)
+	}
+	if got[4].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant_message, got %s", got[4].Kind)
+	}
+	if got[len(got)-1].Kind != contracts.EventKindSessionClosed {
+		t.Fatalf("expected final event session_closed, got %s", got[len(got)-1].Kind)
+	}
+	if got[len(got)-1].Payload.Reason != "stdio_test_complete" {
+		t.Fatalf("expected stdio close reason, got %q", got[len(got)-1].Payload.Reason)
+	}
+}

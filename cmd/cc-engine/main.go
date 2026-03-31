@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/engine"
+	"github.com/cdossman/klaude-kode/internal/transport"
 )
 
 type outputFormat string
@@ -22,6 +24,7 @@ const (
 )
 
 type config struct {
+	Transport       string
 	Format          outputFormat
 	Prompt          string
 	SessionID       string
@@ -47,6 +50,10 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer, stderr io.Writer) error {
+	return runWithInput(args, os.Stdin, stdout, stderr)
+}
+
+func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	cfg, err := parseArgs(args, stderr)
 	if err != nil {
 		return err
@@ -58,6 +65,13 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	ctx := context.Background()
+
+	if cfg.Transport == "stdio" {
+		if cfg.Format != outputFormatEvents {
+			return fmt.Errorf("stdio transport requires -format=events")
+		}
+		return runStdioSession(ctx, runtime, cfg, stdin, stdout)
+	}
 
 	if cfg.ResumeSessionID != "" {
 		return renderPersistedSession(ctx, runtime, cfg, stdout)
@@ -78,6 +92,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	fs := flag.NewFlagSet("cc-engine", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
+	transportValue := fs.String("transport", "headless", "engine transport: headless, stdio")
 	formatValue := fs.String("format", string(outputFormatJSON), "output format: json, text, events")
 	promptValue := fs.String("prompt", "bootstrap hello from cc-engine", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "engine-bootstrap", "session identifier")
@@ -98,7 +113,15 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		return config{}, fmt.Errorf("unsupported format %q", *formatValue)
 	}
 
+	transportMode := strings.ToLower(strings.TrimSpace(*transportValue))
+	switch transportMode {
+	case "headless", "stdio":
+	default:
+		return config{}, fmt.Errorf("unsupported transport %q", *transportValue)
+	}
+
 	return config{
+		Transport:       transportMode,
 		Format:          format,
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
@@ -108,6 +131,87 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		Model:           strings.TrimSpace(*modelValue),
 		StateRoot:       strings.TrimSpace(*stateRootValue),
 	}, nil
+}
+
+func runStdioSession(ctx context.Context, runtime engine.Engine, cfg config, stdin io.Reader, stdout io.Writer) error {
+	handle, err := startStdioSession(ctx, runtime, cfg)
+	if err != nil {
+		return err
+	}
+
+	localTransport := transport.NewLocalTransport(runtime)
+	if err := localTransport.Open(ctx, contracts.TransportTarget{
+		Kind: "local",
+		Addr: handle.SessionID,
+	}); err != nil {
+		return err
+	}
+	defer localTransport.Close(context.Background())
+
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := localTransport.Events(streamCtx)
+	if err != nil {
+		return err
+	}
+
+	encoded := make(chan error, 1)
+	go func() {
+		encoder := json.NewEncoder(stdout)
+		for event := range stream {
+			if err := encoder.Encode(event); err != nil {
+				encoded <- err
+				return
+			}
+		}
+		encoded <- nil
+	}()
+
+	scanner := bufio.NewScanner(stdin)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var cmd contracts.SessionCommand
+		if err := json.Unmarshal([]byte(line), &cmd); err != nil {
+			cancel()
+			<-encoded
+			return fmt.Errorf("decode session command: %w", err)
+		}
+		if err := localTransport.Send(ctx, cmd); err != nil {
+			cancel()
+			<-encoded
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		cancel()
+		<-encoded
+		return err
+	}
+
+	summary, err := runtime.GetSessionSummary(ctx, handle.SessionID)
+	if err == nil && summary.Status != contracts.SessionStatusClosed {
+		if err := localTransport.Send(ctx, contracts.SessionCommand{
+			Kind: contracts.CommandKindCloseSession,
+			Payload: contracts.SessionCommandPayload{
+				Reason: "stdio_eof",
+			},
+		}); err != nil {
+			cancel()
+			<-encoded
+			return err
+		}
+	}
+
+	if err := <-encoded; err != nil {
+		return err
+	}
+	return nil
 }
 
 func executeHeadlessSession(ctx context.Context, runtime engine.Engine, cfg config) (result, error) {
@@ -176,6 +280,20 @@ func streamEvents(ctx context.Context, runtime engine.Engine, cfg config, stdout
 		}
 	}
 	return nil
+}
+
+func startStdioSession(ctx context.Context, runtime engine.Engine, cfg config) (contracts.SessionHandle, error) {
+	if cfg.ResumeSessionID != "" {
+		return runtime.ResumeSession(ctx, contracts.ResumeSessionRequest{SessionID: cfg.ResumeSessionID})
+	}
+
+	return runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: cfg.SessionID,
+		CWD:       cfg.CWD,
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: cfg.ProfileID,
+		Model:     cfg.Model,
+	})
 }
 
 func startHeadlessSession(ctx context.Context, runtime engine.Engine, cfg config) (contracts.SessionHandle, error) {
