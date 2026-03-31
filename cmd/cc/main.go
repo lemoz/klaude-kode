@@ -299,23 +299,65 @@ func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) er
 	}
 	for _, profile := range catalog.Profiles {
 		line := fmt.Sprintf(
-			"- %s (%s/%s) default_model=%s valid=%t",
+			"- %s (%s/%s) default_model=%s valid=%t auth=%s",
 			profile.Profile.ID,
 			profile.Profile.Provider,
 			profile.Profile.Kind,
 			profile.Profile.DefaultModel,
 			profile.Validation.Valid,
+			profile.Auth.State,
 		)
 		lines = append(lines, line)
+		if profile.Auth.ExpiresAt != "" {
+			lines = append(lines, fmt.Sprintf("  expires_at: %s", profile.Auth.ExpiresAt))
+		}
+		if profile.Auth.CanRefresh {
+			lines = append(lines, "  can_refresh: true")
+		}
 		if profile.Validation.Message != "" {
 			lines = append(lines, fmt.Sprintf("  validation: %s", profile.Validation.Message))
 		}
 		if len(profile.Models) > 0 {
 			lines = append(lines, fmt.Sprintf("  models: %s", strings.Join(profile.Models, ", ")))
 		}
+		if caps := formatCapabilities(profile.Capabilities); caps != "" {
+			lines = append(lines, fmt.Sprintf("  capabilities: %s", caps))
+		}
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
+}
+
+func formatCapabilities(caps contracts.CapabilitySet) string {
+	enabled := make([]string, 0, 9)
+	if caps.Streaming {
+		enabled = append(enabled, "streaming")
+	}
+	if caps.ToolCalling {
+		enabled = append(enabled, "tool_calling")
+	}
+	if caps.StructuredOutputs {
+		enabled = append(enabled, "structured_outputs")
+	}
+	if caps.TokenCounting {
+		enabled = append(enabled, "token_counting")
+	}
+	if caps.PromptCaching {
+		enabled = append(enabled, "prompt_caching")
+	}
+	if caps.ReasoningControls {
+		enabled = append(enabled, "reasoning_controls")
+	}
+	if caps.DeferredToolSearch {
+		enabled = append(enabled, "deferred_tool_search")
+	}
+	if caps.ImageInput {
+		enabled = append(enabled, "image_input")
+	}
+	if caps.DocumentInput {
+		enabled = append(enabled, "document_input")
+	}
+	return strings.Join(enabled, ", ")
 }
 
 func renderText(stdout io.Writer, sessionResult result) error {

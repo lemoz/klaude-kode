@@ -147,6 +147,9 @@ func TestRunProfilesJSON(t *testing.T) {
 	if !got.Profiles[0].Validation.Valid {
 		t.Fatalf("expected first profile to validate, got %#v", got.Profiles[0].Validation)
 	}
+	if !got.Profiles[0].Capabilities.Streaming || !got.Profiles[0].Capabilities.ToolCalling {
+		t.Fatalf("expected profile capabilities in catalog, got %#v", got.Profiles[0].Capabilities)
+	}
 }
 
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {

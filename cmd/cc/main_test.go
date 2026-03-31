@@ -143,6 +143,9 @@ func TestRunProfilesText(t *testing.T) {
 	if !strings.Contains(output, "openrouter-main") {
 		t.Fatalf("expected openrouter-main in profile output, got %q", output)
 	}
+	if !strings.Contains(output, "capabilities: streaming") {
+		t.Fatalf("expected capabilities in profile output, got %q", output)
+	}
 }
 
 func TestResumePersistedSession(t *testing.T) {

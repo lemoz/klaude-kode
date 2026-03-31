@@ -68,10 +68,23 @@ export interface ProfileAuthStatus {
   can_refresh: boolean;
 }
 
+export interface CapabilitySet {
+  streaming: boolean;
+  tool_calling: boolean;
+  structured_outputs: boolean;
+  token_counting: boolean;
+  prompt_caching: boolean;
+  reasoning_controls: boolean;
+  deferred_tool_search: boolean;
+  image_input: boolean;
+  document_input: boolean;
+}
+
 export interface ProfileStatus {
   profile: AuthProfile;
   validation: ProfileValidationResult;
   models: string[];
+  capabilities: CapabilitySet;
   auth: ProfileAuthStatus;
 }
 

@@ -1338,6 +1338,16 @@ func (e *InMemoryEngine) buildProfileStatus(ctx context.Context, profile contrac
 		if err == nil {
 			status.Models = models
 		}
+		if validation.Valid {
+			model := strings.TrimSpace(profile.DefaultModel)
+			if model == "" && len(status.Models) > 0 {
+				model = status.Models[0]
+			}
+			capabilities, err := e.providers.Capabilities(ctx, profile, model)
+			if err == nil {
+				status.Capabilities = capabilities
+			}
+		}
 	}
 	return status, nil
 }

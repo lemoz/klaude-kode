@@ -585,7 +585,43 @@ function renderProfiles(
     if (entry.models.length > 0) {
       ui.writeLine(`  models: ${entry.models.join(", ")}`);
     }
+    const capabilities = formatCapabilities(entry.capabilities);
+    if (capabilities !== "") {
+      ui.writeLine(`  capabilities: ${capabilities}`);
+    }
   }
+}
+
+function formatCapabilities(capabilities: ProfileStatus["capabilities"]): string {
+  const enabled: string[] = [];
+  if (capabilities.streaming) {
+    enabled.push("streaming");
+  }
+  if (capabilities.tool_calling) {
+    enabled.push("tool_calling");
+  }
+  if (capabilities.structured_outputs) {
+    enabled.push("structured_outputs");
+  }
+  if (capabilities.token_counting) {
+    enabled.push("token_counting");
+  }
+  if (capabilities.prompt_caching) {
+    enabled.push("prompt_caching");
+  }
+  if (capabilities.reasoning_controls) {
+    enabled.push("reasoning_controls");
+  }
+  if (capabilities.deferred_tool_search) {
+    enabled.push("deferred_tool_search");
+  }
+  if (capabilities.image_input) {
+    enabled.push("image_input");
+  }
+  if (capabilities.document_input) {
+    enabled.push("document_input");
+  }
+  return enabled.join(", ");
 }
 
 function printHelp(): void {

@@ -104,6 +104,9 @@ func TestListProfilesReturnsStoredProfilesWithValidation(t *testing.T) {
 	if len(profiles[0].Models) == 0 {
 		t.Fatalf("expected provider models for first profile")
 	}
+	if !profiles[0].Capabilities.Streaming || !profiles[0].Capabilities.ToolCalling {
+		t.Fatalf("expected seeded anthropic profile capabilities, got %#v", profiles[0].Capabilities)
+	}
 }
 
 func TestSaveProfilePersistsNewDefaultProfile(t *testing.T) {

@@ -26,29 +26,29 @@ const (
 )
 
 type config struct {
-	Transport       string
-	Format          outputFormat
-	ListProfiles    bool
-	UpsertProfile   bool
+	Transport           string
+	Format              outputFormat
+	ListProfiles        bool
+	UpsertProfile       bool
 	AnthropicOAuthLogin bool
-	LogoutProfileID string
-	Prompt          string
-	SessionID       string
-	ResumeSessionID string
-	CWD             string
-	ProfileID       string
-	Model           string
-	ProfileProvider string
-	ProfileKind     string
-	DisplayName     string
-	DefaultModel    string
-	CredentialRef   string
-	APIBase         string
-	OAuthHost       string
-	AccountScope    string
-	OAuthOpenBrowser bool
-	MakeDefault     bool
-	StateRoot       string
+	LogoutProfileID     string
+	Prompt              string
+	SessionID           string
+	ResumeSessionID     string
+	CWD                 string
+	ProfileID           string
+	Model               string
+	ProfileProvider     string
+	ProfileKind         string
+	DisplayName         string
+	DefaultModel        string
+	CredentialRef       string
+	APIBase             string
+	OAuthHost           string
+	AccountScope        string
+	OAuthOpenBrowser    bool
+	MakeDefault         bool
+	StateRoot           string
 }
 
 type result struct {
@@ -183,29 +183,29 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	}
 
 	return config{
-		Transport:       transportMode,
-		Format:          format,
-		ListProfiles:    *listProfilesValue,
-		UpsertProfile:   *upsertProfileValue,
+		Transport:           transportMode,
+		Format:              format,
+		ListProfiles:        *listProfilesValue,
+		UpsertProfile:       *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
-		LogoutProfileID: strings.TrimSpace(*logoutProfileValue),
-		Prompt:          strings.TrimSpace(*promptValue),
-		SessionID:       strings.TrimSpace(*sessionIDValue),
-		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
-		CWD:             strings.TrimSpace(*cwdValue),
-		ProfileID:       strings.TrimSpace(*profileIDValue),
-		Model:           strings.TrimSpace(*modelValue),
-		ProfileProvider: strings.TrimSpace(*profileProviderValue),
-		ProfileKind:     strings.TrimSpace(*profileKindValue),
-		DisplayName:     strings.TrimSpace(*displayNameValue),
-		DefaultModel:    strings.TrimSpace(*defaultModelValue),
-		CredentialRef:   strings.TrimSpace(*credentialRefValue),
-		APIBase:         strings.TrimSpace(*apiBaseValue),
-		OAuthHost:       strings.TrimSpace(*oauthHostValue),
-		AccountScope:    strings.TrimSpace(*accountScopeValue),
-		OAuthOpenBrowser: *oauthOpenBrowserValue,
-		MakeDefault:     *makeDefaultValue,
-		StateRoot:       strings.TrimSpace(*stateRootValue),
+		LogoutProfileID:     strings.TrimSpace(*logoutProfileValue),
+		Prompt:              strings.TrimSpace(*promptValue),
+		SessionID:           strings.TrimSpace(*sessionIDValue),
+		ResumeSessionID:     strings.TrimSpace(*resumeSessionValue),
+		CWD:                 strings.TrimSpace(*cwdValue),
+		ProfileID:           strings.TrimSpace(*profileIDValue),
+		Model:               strings.TrimSpace(*modelValue),
+		ProfileProvider:     strings.TrimSpace(*profileProviderValue),
+		ProfileKind:         strings.TrimSpace(*profileKindValue),
+		DisplayName:         strings.TrimSpace(*displayNameValue),
+		DefaultModel:        strings.TrimSpace(*defaultModelValue),
+		CredentialRef:       strings.TrimSpace(*credentialRefValue),
+		APIBase:             strings.TrimSpace(*apiBaseValue),
+		OAuthHost:           strings.TrimSpace(*oauthHostValue),
+		AccountScope:        strings.TrimSpace(*accountScopeValue),
+		OAuthOpenBrowser:    *oauthOpenBrowserValue,
+		MakeDefault:         *makeDefaultValue,
+		StateRoot:           strings.TrimSpace(*stateRootValue),
 	}, nil
 }
 
@@ -468,14 +468,14 @@ func loginAnthropicOAuthAndRenderCatalog(ctx context.Context, runtime engine.Eng
 	}
 
 	result, err := performAnthropicOAuthLogin(ctx, anthropicoauth.LoginOptions{
-		ProfileID:      profileID,
-		DisplayName:    displayName,
-		DefaultModel:   defaultModel,
-		AccountScope:   accountScope,
-		OAuthHost:      cfg.OAuthHost,
-		APIBase:        cfg.APIBase,
-		OpenBrowser:    cfg.OAuthOpenBrowser,
-		Output:         stderr,
+		ProfileID:    profileID,
+		DisplayName:  displayName,
+		DefaultModel: defaultModel,
+		AccountScope: accountScope,
+		OAuthHost:    cfg.OAuthHost,
+		APIBase:      cfg.APIBase,
+		OpenBrowser:  cfg.OAuthOpenBrowser,
+		Output:       stderr,
 	})
 	if err != nil {
 		return err
@@ -533,9 +533,44 @@ func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) er
 		if len(profile.Models) > 0 {
 			lines = append(lines, fmt.Sprintf("  models: %s", strings.Join(profile.Models, ", ")))
 		}
+		if caps := formatCapabilities(profile.Capabilities); caps != "" {
+			lines = append(lines, fmt.Sprintf("  capabilities: %s", caps))
+		}
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
+}
+
+func formatCapabilities(caps contracts.CapabilitySet) string {
+	enabled := make([]string, 0, 9)
+	if caps.Streaming {
+		enabled = append(enabled, "streaming")
+	}
+	if caps.ToolCalling {
+		enabled = append(enabled, "tool_calling")
+	}
+	if caps.StructuredOutputs {
+		enabled = append(enabled, "structured_outputs")
+	}
+	if caps.TokenCounting {
+		enabled = append(enabled, "token_counting")
+	}
+	if caps.PromptCaching {
+		enabled = append(enabled, "prompt_caching")
+	}
+	if caps.ReasoningControls {
+		enabled = append(enabled, "reasoning_controls")
+	}
+	if caps.DeferredToolSearch {
+		enabled = append(enabled, "deferred_tool_search")
+	}
+	if caps.ImageInput {
+		enabled = append(enabled, "image_input")
+	}
+	if caps.DocumentInput {
+		enabled = append(enabled, "document_input")
+	}
+	return strings.Join(enabled, ", ")
 }
 
 func buildProfileFromConfig(cfg config) (contracts.AuthProfile, error) {

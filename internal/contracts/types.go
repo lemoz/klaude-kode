@@ -267,15 +267,15 @@ type ProviderEvent struct {
 }
 
 type CapabilitySet struct {
-	Streaming          bool
-	ToolCalling        bool
-	StructuredOutputs  bool
-	TokenCounting      bool
-	PromptCaching      bool
-	ReasoningControls  bool
-	DeferredToolSearch bool
-	ImageInput         bool
-	DocumentInput      bool
+	Streaming          bool `json:"streaming"`
+	ToolCalling        bool `json:"tool_calling"`
+	StructuredOutputs  bool `json:"structured_outputs"`
+	TokenCounting      bool `json:"token_counting"`
+	PromptCaching      bool `json:"prompt_caching"`
+	ReasoningControls  bool `json:"reasoning_controls"`
+	DeferredToolSearch bool `json:"deferred_tool_search"`
+	ImageInput         bool `json:"image_input"`
+	DocumentInput      bool `json:"document_input"`
 }
 
 type AuthProfile struct {
@@ -309,10 +309,11 @@ type ProfileAuthStatus struct {
 }
 
 type ProfileStatus struct {
-	Profile    AuthProfile             `json:"profile"`
-	Validation ProfileValidationResult `json:"validation"`
-	Models     []string                `json:"models"`
-	Auth       ProfileAuthStatus       `json:"auth"`
+	Profile      AuthProfile             `json:"profile"`
+	Validation   ProfileValidationResult `json:"validation"`
+	Models       []string                `json:"models"`
+	Capabilities CapabilitySet           `json:"capabilities"`
+	Auth         ProfileAuthStatus       `json:"auth"`
 }
 
 type ToolDescriptor struct {
