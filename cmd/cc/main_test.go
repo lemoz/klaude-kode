@@ -174,6 +174,45 @@ func TestRunModelsText(t *testing.T) {
 	}
 }
 
+func TestRunStatusText(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state-root")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-format=json",
+		"-prompt=status seed",
+		"-session-id=status-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("seed run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-status",
+		"-resume-session=status-target",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("status run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc session status") {
+		t.Fatalf("expected status header, got %q", output)
+	}
+	if !strings.Contains(output, "session: status-target") {
+		t.Fatalf("expected session id in status output, got %q", output)
+	}
+	if !strings.Contains(output, "status: closed") {
+		t.Fatalf("expected closed status in output, got %q", output)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 

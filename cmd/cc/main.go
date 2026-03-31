@@ -26,6 +26,7 @@ type config struct {
 	Format          outputFormat
 	ListProfiles    bool
 	ListModels      bool
+	ShowStatus      bool
 	Prompt          string
 	SessionID       string
 	ResumeSessionID string
@@ -54,6 +55,12 @@ type modelCatalogResult struct {
 	DefaultModel string                  `json:"default_model"`
 	Models       []string                `json:"models"`
 	Capabilities contracts.CapabilitySet `json:"capabilities"`
+}
+
+type sessionStatusResult struct {
+	Launcher string                   `json:"launcher"`
+	Session  string                   `json:"session"`
+	Summary  contracts.SessionSummary `json:"summary"`
 }
 
 type collectedEvents struct {
@@ -92,6 +99,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return renderModelCatalog(ctx, runtime, cfg, stdout)
 	}
+	if cfg.ShowStatus {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-status does not support -format=events")
+		}
+		return renderSessionStatus(ctx, runtime, cfg, stdout)
+	}
 	if cfg.ResumeSessionID != "" {
 		return renderPersistedSession(ctx, runtime, cfg, stdout)
 	}
@@ -111,6 +124,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	formatValue := fs.String("format", string(outputFormatText), "output format: json, text, events")
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
+	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "cc-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -134,6 +148,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		Format:          format,
 		ListProfiles:    *listProfilesValue,
 		ListModels:      *listModelsValue,
+		ShowStatus:      *showStatusValue,
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
@@ -323,6 +338,38 @@ func renderModelCatalog(ctx context.Context, runtime engine.Engine, cfg config, 
 	}
 }
 
+func renderSessionStatus(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	sessionID := strings.TrimSpace(cfg.ResumeSessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(cfg.SessionID)
+	}
+	if sessionID == "" {
+		return fmt.Errorf("a session id is required for -status")
+	}
+
+	summary, err := runtime.GetSessionSummary(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	result := sessionStatusResult{
+		Launcher: "cc",
+		Session:  sessionID,
+		Summary:  summary,
+	}
+
+	switch cfg.Format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderSessionStatusText(stdout, result)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatEvents:
@@ -390,6 +437,26 @@ func renderModelCatalogText(stdout io.Writer, catalog modelCatalogResult) error 
 	}
 	if caps := formatCapabilities(catalog.Capabilities); caps != "" {
 		lines = append(lines, fmt.Sprintf("capabilities: %s", caps))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderSessionStatusText(stdout io.Writer, result sessionStatusResult) error {
+	lines := []string{
+		"cc session status",
+		fmt.Sprintf("session: %s", result.Session),
+		fmt.Sprintf("mode: %s", result.Summary.Mode),
+		fmt.Sprintf("status: %s", result.Summary.Status),
+		fmt.Sprintf("profile: %s", result.Summary.ProfileID),
+		fmt.Sprintf("model: %s", result.Summary.Model),
+		fmt.Sprintf("turns: %d", result.Summary.TurnCount),
+		fmt.Sprintf("events: %d", result.Summary.EventCount),
+		fmt.Sprintf("last_event: %s", result.Summary.LastEventKind),
+		fmt.Sprintf("terminal_outcome: %s", result.Summary.TerminalOutcome),
+	}
+	if result.Summary.ClosedReason != "" {
+		lines = append(lines, fmt.Sprintf("closed_reason: %s", result.Summary.ClosedReason))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
