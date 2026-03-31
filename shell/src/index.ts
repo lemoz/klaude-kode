@@ -6,6 +6,7 @@ import {
   defaultShellConfig,
   makeCloseSessionCommand,
   makeDenyPermissionCommand,
+  makeUpdateSessionSettingCommand,
   makeUserInputCommand,
   startEngineSession,
   type PermissionEventPayload,
@@ -146,6 +147,14 @@ async function runInteractiveLoop(
         closedByUser = true;
         break;
       }
+      const slashCommand = parseSlashCommand(line);
+      if (slashCommand) {
+        const decisionVersion = ui.decisionVersion();
+        await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
+        await ui.waitForDecision(decisionVersion);
+        ui.showPrompt(ui.currentPrompt());
+        continue;
+      }
       const pendingPermission = ui.takePendingPermission();
       if (pendingPermission) {
         const decisionVersion = ui.decisionVersion();
@@ -179,6 +188,7 @@ async function runInteractiveLoop(
 
 function createRenderer(rawEvents: boolean) {
   let headerPrinted = false;
+  let currentState: SessionStateSnapshot | null = null;
   const pendingPermissions: PermissionEventPayload[] = [];
   let decisionSignals = 0;
   let notifyDecision: (() => void) | null = null;
@@ -207,6 +217,19 @@ function createRenderer(rawEvents: boolean) {
         print(`mode: ${state.mode}`);
         print(`model: ${state.model}`);
         headerPrinted = true;
+        currentState = state;
+      } else if (
+        event.kind === "session_state" &&
+        state &&
+        currentState &&
+        state.status === "active" &&
+        (state.model !== currentState.model ||
+          state.profile_id !== currentState.profile_id)
+      ) {
+        print(`session: model=${state.model} profile=${state.profile_id}`);
+        currentState = state;
+      } else if (state) {
+        currentState = state;
       }
 
       const rendered = renderEvent(event);
@@ -219,6 +242,7 @@ function createRenderer(rawEvents: boolean) {
       }
       if (
         event.kind === "permission_requested" ||
+        event.kind === "session_state" ||
         event.kind === "assistant_message" ||
         event.kind === "failure" ||
         event.kind === "session_closed"
@@ -311,6 +335,29 @@ function renderTerminalOutcome(state: SessionStateSnapshot | null): string {
 function looksApproved(line: string): boolean {
   const normalized = line.trim().toLowerCase();
   return normalized === "y" || normalized === "yes";
+}
+
+function parseSlashCommand(
+  line: string,
+): { key: "model" | "profile_id"; value: string } | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("/")) {
+    return null;
+  }
+
+  if (trimmed.startsWith("/model ")) {
+    const value = trimmed.slice("/model ".length).trim();
+    if (value !== "") {
+      return { key: "model", value };
+    }
+  }
+  if (trimmed.startsWith("/profile ")) {
+    const value = trimmed.slice("/profile ".length).trim();
+    if (value !== "") {
+      return { key: "profile_id", value };
+    }
+  }
+  return null;
 }
 
 function printHelp(): void {

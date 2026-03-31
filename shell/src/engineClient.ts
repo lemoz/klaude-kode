@@ -90,6 +90,8 @@ export interface SessionCommandPayload {
   reason?: string;
   request_id?: string;
   source?: string;
+  setting_key?: string;
+  setting_value?: string;
   metadata?: Record<string, string>;
 }
 
@@ -219,6 +221,19 @@ export function makeDenyPermissionCommand(requestID: string): SessionCommand {
     kind: "deny_permission",
     payload: {
       request_id: requestID,
+    },
+  };
+}
+
+export function makeUpdateSessionSettingCommand(
+  key: string,
+  value: string,
+): SessionCommand {
+  return {
+    kind: "update_session_setting",
+    payload: {
+      setting_key: key,
+      setting_value: value,
     },
   };
 }
