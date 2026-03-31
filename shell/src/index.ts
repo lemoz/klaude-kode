@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import process from "node:process";
 
@@ -17,6 +19,7 @@ import {
   startEngineSession,
   type PermissionEventPayload,
   type ProfileStatus,
+  exportReplayPack,
   type SessionEvent,
   type SessionStateSnapshot,
   type ShellConfig,
@@ -180,6 +183,15 @@ async function runInteractiveLoop(
         }
         if (slashCommand?.kind === "status") {
           renderStatus(ui, config, ui.currentState());
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "export_replay") {
+          const targetPath = path.resolve(config.cwd, slashCommand.outputPath);
+          const replayPack = await exportReplayPack(config);
+          await mkdir(path.dirname(targetPath), { recursive: true });
+          await writeFile(targetPath, `${JSON.stringify(replayPack, null, 2)}\n`, "utf8");
+          ui.writeLine(`export: wrote replay pack to ${targetPath}`);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -476,6 +488,7 @@ function parseSlashCommand(
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
   | { kind: "profiles" }
   | { kind: "status" }
+  | { kind: "export_replay"; outputPath: string }
   | { kind: "models"; profileId?: string }
   | { kind: "logout"; profileId: string }
   | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
@@ -492,6 +505,13 @@ function parseSlashCommand(
   }
   if (trimmed === "/status") {
     return { kind: "status" };
+  }
+  if (trimmed.startsWith("/export-replay ")) {
+    const outputPath = trimmed.slice("/export-replay ".length).trim();
+    if (outputPath === "") {
+      throw new Error("usage: /export-replay <path>");
+    }
+    return { kind: "export_replay", outputPath };
   }
   if (trimmed === "/models") {
     return { kind: "models" };
@@ -742,6 +762,7 @@ function printHelp(): void {
     "Interactive commands:",
     "  /profiles",
     "  /status",
+    "  /export-replay <path>",
     "  /models [profile-id]",
     "  /logout [anthropic|openrouter]",
     "  /profile <id>",

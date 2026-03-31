@@ -95,6 +95,36 @@ export interface ModelCatalog {
   capabilities: CapabilitySet;
 }
 
+export interface ReplayPack {
+  schema_version: string;
+  exported_at: string;
+  session: {
+    session_id: string;
+    cwd: string;
+    mode: string;
+    profile_id: string;
+    model: string;
+    created_at: string;
+  };
+  summary: {
+    session_id: string;
+    cwd: string;
+    mode: string;
+    status: string;
+    profile_id: string;
+    model: string;
+    created_at: string;
+    updated_at: string;
+    event_count: number;
+    turn_count: number;
+    last_sequence: number;
+    last_event_kind: string;
+    closed_reason: string;
+    terminal_outcome: string;
+  };
+  events: SessionEvent[];
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -309,6 +339,23 @@ export async function listModels(
   }
   const stdout = await runEngineAdminCommand(args);
   return JSON.parse(stdout) as ModelCatalog;
+}
+
+export async function exportReplayPack(
+  config: Pick<ShellConfig, "stateRoot" | "sessionId" | "resumeSessionId">,
+): Promise<ReplayPack> {
+  const args = [
+    "-format=json",
+    "-export-replay-pack",
+    `-state-root=${config.stateRoot}`,
+  ];
+  if (config.resumeSessionId !== "") {
+    args.push(`-resume-session=${config.resumeSessionId}`);
+  } else {
+    args.push(`-resume-session=${config.sessionId}`);
+  }
+  const stdout = await runEngineAdminCommand(args);
+  return JSON.parse(stdout) as ReplayPack;
 }
 
 export async function logoutProfile(
