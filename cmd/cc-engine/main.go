@@ -13,6 +13,7 @@ import (
 	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/engine"
+	"github.com/cdossman/klaude-kode/internal/harness"
 	"github.com/cdossman/klaude-kode/internal/provider"
 	"github.com/cdossman/klaude-kode/internal/transport"
 )
@@ -32,6 +33,7 @@ type config struct {
 	ListModels          bool
 	ShowStatus          bool
 	ExportReplayPack    bool
+	ValidateCandidate   bool
 	UpsertProfile       bool
 	AnthropicOAuthLogin bool
 	LogoutProfileID     string
@@ -130,6 +132,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return renderReplayPack(ctx, runtime, cfg, stdout)
 	}
+	if cfg.ValidateCandidate {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-validate-candidate does not support -format=events")
+		}
+		return renderCandidateValidation(cfg, stdout)
+	}
 	if cfg.UpsertProfile {
 		if cfg.Format == outputFormatEvents {
 			return fmt.Errorf("-upsert-profile does not support -format=events")
@@ -181,6 +189,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
 	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
+	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
 	logoutProfileValue := fs.String("logout-profile", "", "clear stored auth from the specified profile and exit")
@@ -227,6 +236,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ListModels:          *listModelsValue,
 		ShowStatus:          *showStatusValue,
 		ExportReplayPack:    *exportReplayPackValue,
+		ValidateCandidate:   *validateCandidateValue,
 		UpsertProfile:       *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
 		LogoutProfileID:     strings.TrimSpace(*logoutProfileValue),
@@ -571,6 +581,24 @@ func renderReplayPack(ctx context.Context, runtime engine.Engine, cfg config, st
 	}
 }
 
+func renderCandidateValidation(cfg config, stdout io.Writer) error {
+	result, err := harness.ValidateCandidateRoot(cfg.CWD)
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderCandidateValidationText(stdout, result)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+}
+
 func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
 	profile, err := buildProfileFromConfig(cfg)
 	if err != nil {
@@ -720,6 +748,24 @@ func renderReplayPackText(stdout io.Writer, pack contracts.ReplayPack) error {
 		fmt.Sprintf("model: %s", pack.Summary.Model),
 		fmt.Sprintf("events: %d", len(pack.Events)),
 		fmt.Sprintf("terminal_outcome: %s", pack.Summary.TerminalOutcome),
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderCandidateValidationText(stdout io.Writer, result harness.CandidateValidationResult) error {
+	lines := []string{
+		"cc-engine candidate validation",
+		fmt.Sprintf("valid: %t", result.Valid),
+		fmt.Sprintf("root: %s", result.Candidate.Root),
+		fmt.Sprintf("default_profile: %s", result.Candidate.DefaultProfileID),
+		fmt.Sprintf("default_model: %s", result.Candidate.DefaultModel),
+	}
+	if len(result.Issues) > 0 {
+		lines = append(lines, "issues:")
+		for _, issue := range result.Issues {
+			lines = append(lines, "  - "+issue)
+		}
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err

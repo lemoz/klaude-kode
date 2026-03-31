@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/engine"
+	"github.com/cdossman/klaude-kode/internal/harness"
 )
 
 func TestRunJSONFormat(t *testing.T) {
@@ -265,6 +267,44 @@ func TestRunExportReplayPackJSON(t *testing.T) {
 	}
 	if len(got.Events) == 0 {
 		t.Fatalf("expected replay pack events")
+	}
+}
+
+func TestRunValidateCandidateJSON(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"cmd/cc", "cmd/cc-engine", "shell", "docs"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatalf("MkdirAll returned error: %v", err)
+		}
+	}
+	for _, file := range []string{
+		"cmd/cc/main.go",
+		"cmd/cc-engine/main.go",
+		"shell/package.json",
+		"docs/05-roadmap.md",
+	} {
+		if err := os.WriteFile(filepath.Join(root, file), []byte("stub"), 0o644); err != nil {
+			t.Fatalf("WriteFile returned error: %v", err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := run([]string{
+		"-format=json",
+		"-validate-candidate",
+		"-cwd=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var got harness.CandidateValidationResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse validation output: %v", err)
+	}
+	if !got.Valid {
+		t.Fatalf("expected valid candidate result, got %#v", got)
 	}
 }
 
