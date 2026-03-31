@@ -137,6 +137,46 @@ func TestOpenRouterCapabilitiesAllowCustomModels(t *testing.T) {
 	}
 }
 
+func TestValidateModelRejectsUnknownAnthropicModel(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+	profile := contracts.AuthProfile{
+		ID:       "anthropic-main",
+		Kind:     contracts.AuthProfileAnthropicAPIKey,
+		Provider: contracts.ProviderAnthropic,
+		Settings: map[string]string{
+			"api_key": "secret",
+		},
+	}
+
+	err := registry.ValidateModel(ctx, profile, "claude-not-real")
+	if err == nil {
+		t.Fatalf("expected invalid model error")
+	}
+	providerErr := AsError(err)
+	if providerErr == nil || providerErr.Code != ErrorCodeInvalidModel {
+		t.Fatalf("expected invalid model provider error, got %v", err)
+	}
+}
+
+func TestValidateModelAllowsCustomOpenRouterModel(t *testing.T) {
+	ctx := context.Background()
+	registry := DefaultRegistry()
+	profile := contracts.AuthProfile{
+		ID:       "openrouter-main",
+		Kind:     contracts.AuthProfileOpenRouterAPIKey,
+		Provider: contracts.ProviderOpenRouter,
+		Settings: map[string]string{
+			"credential_ref": "keychain://openrouter-main",
+			"api_base":       "https://openrouter.ai/api/v1",
+		},
+	}
+
+	if err := registry.ValidateModel(ctx, profile, "my/custom-model"); err != nil {
+		t.Fatalf("expected openrouter custom model to validate, got %v", err)
+	}
+}
+
 func TestCountTokensReturnsDeterministicEstimate(t *testing.T) {
 	ctx := context.Background()
 	registry := DefaultRegistry()
@@ -349,6 +389,10 @@ func TestCompleteFailsWhenEnvCredentialIsMissing(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected missing env credential error")
+	}
+	providerErr := AsError(err)
+	if providerErr == nil || providerErr.Code != ErrorCodeAuthUnavailable {
+		t.Fatalf("expected auth_unavailable provider error, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "env://ANTHROPIC_TEST_KEY_MISSING") {
 		t.Fatalf("expected missing env credential in error, got %v", err)

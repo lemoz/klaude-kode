@@ -360,6 +360,149 @@ func TestProfileSwitchAdoptsStoredProfileDefaults(t *testing.T) {
 	}
 }
 
+func TestInvalidAnthropicModelFailsBeforeProviderCall(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_invalid_model",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: "anthropic-main",
+		Model:     "claude-not-real",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello invalid model",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if events[4].Kind != contracts.EventKindFailure {
+		t.Fatalf("expected failure event at sequence 5, got %s", events[4].Kind)
+	}
+	if events[4].Payload.Failure == nil || events[4].Payload.Failure.Code != "invalid_model" {
+		t.Fatalf("expected invalid_model failure payload, got %#v", events[4].Payload.Failure)
+	}
+	if events[4].Payload.Failure.Category != contracts.FailureCategoryProvider {
+		t.Fatalf("expected provider failure category, got %#v", events[4].Payload.Failure)
+	}
+	if events[6].Kind != contracts.EventKindLifecycle || events[6].Payload.TerminalOutcome != contracts.TerminalOutcomeValidationFailure {
+		t.Fatalf("expected validation_failure turn completion, got %s (%s)", events[6].Kind, events[6].Payload.TerminalOutcome)
+	}
+	if events[7].Payload.State == nil || events[7].Payload.State.TerminalOutcome != contracts.TerminalOutcomeValidationFailure {
+		t.Fatalf("expected validation failure in state snapshot, got %#v", events[7].Payload.State)
+	}
+}
+
+func TestOpenRouterCustomModelRemainsUsable(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_openrouter_custom",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: "openrouter-main",
+		Model:     "my/custom-model",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello custom openrouter",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if events[4].Payload.Message == nil || !strings.Contains(events[4].Payload.Message.Content, "OpenRouter response from my/custom-model") {
+		t.Fatalf("expected custom openrouter model response, got %#v", events[4].Payload.Message)
+	}
+}
+
+func TestMissingEnvCredentialProducesAuthFailure(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	runtime, err := NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+
+	if _, err := runtime.SaveProfile(ctx, contracts.AuthProfile{
+		ID:           "anthropic-live-missing",
+		Kind:         contracts.AuthProfileAnthropicAPIKey,
+		Provider:     contracts.ProviderAnthropic,
+		DisplayName:  "Anthropic Live Missing",
+		DefaultModel: "claude-sonnet-4-6",
+		Settings: map[string]string{
+			"credential_ref": "env://ANTHROPIC_TEST_KEY_MISSING",
+			"api_base":       "https://api.anthropic.com",
+		},
+	}, true); err != nil {
+		t.Fatalf("SaveProfile returned error: %v", err)
+	}
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_missing_auth",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello missing auth",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if events[4].Kind != contracts.EventKindFailure {
+		t.Fatalf("expected failure event at sequence 5, got %s", events[4].Kind)
+	}
+	if events[4].Payload.Failure == nil || events[4].Payload.Failure.Category != contracts.FailureCategoryAuth {
+		t.Fatalf("expected auth failure payload, got %#v", events[4].Payload.Failure)
+	}
+	if events[4].Payload.Failure.Code != "auth_unavailable" {
+		t.Fatalf("expected auth_unavailable code, got %#v", events[4].Payload.Failure)
+	}
+	if events[4].Payload.Failure.Retryable {
+		t.Fatalf("expected auth_unavailable to be non-retryable")
+	}
+	if events[6].Kind != contracts.EventKindLifecycle || events[6].Payload.TerminalOutcome != contracts.TerminalOutcomeProviderFailure {
+		t.Fatalf("expected provider_failure outcome, got %s (%s)", events[6].Kind, events[6].Payload.TerminalOutcome)
+	}
+}
+
 func TestCloseSessionPreservesReplayState(t *testing.T) {
 	ctx := context.Background()
 	runtime := NewInMemoryEngine()

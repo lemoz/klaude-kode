@@ -34,11 +34,19 @@ func resolveLiveCredential(profile contracts.AuthProfile) (resolvedCredential, e
 	if strings.HasPrefix(credentialRef, "env://") {
 		name := strings.TrimSpace(strings.TrimPrefix(credentialRef, "env://"))
 		if name == "" {
-			return resolvedCredential{}, fmt.Errorf("%w: env credential name is empty", ErrCredentialUnavailable)
+			return resolvedCredential{}, &Error{
+				Code:      ErrorCodeAuthUnavailable,
+				Message:   "env credential name is empty",
+				Retryable: false,
+			}
 		}
 		value := strings.TrimSpace(os.Getenv(name))
 		if value == "" {
-			return resolvedCredential{}, fmt.Errorf("%w: %s", ErrCredentialUnavailable, credentialRef)
+			return resolvedCredential{}, &Error{
+				Code:      ErrorCodeAuthUnavailable,
+				Message:   fmt.Sprintf("credential is unavailable: %s", credentialRef),
+				Retryable: false,
+			}
 		}
 		return resolvedCredential{
 			Value:  value,

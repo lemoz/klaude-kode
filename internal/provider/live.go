@@ -146,7 +146,10 @@ func completeAnthropicLive(ctx context.Context, apiBase string, apiKey string, r
 		return contracts.CompletionResult{}, fmt.Errorf("decode anthropic response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return contracts.CompletionResult{}, fmt.Errorf("anthropic request failed: %s", anthropicErrorMessage(parsed.Error, string(responseBody), resp.StatusCode))
+		return contracts.CompletionResult{}, classifyHTTPError(
+			resp.StatusCode,
+			anthropicErrorMessage(parsed.Error, string(responseBody), resp.StatusCode),
+		)
 	}
 
 	text := ""
@@ -229,7 +232,7 @@ func completeOpenRouterLive(ctx context.Context, apiBase string, apiKey string, 
 		if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
 			message = parsed.Error.Message
 		}
-		return contracts.CompletionResult{}, fmt.Errorf("openrouter request failed: %s", message)
+		return contracts.CompletionResult{}, classifyHTTPError(resp.StatusCode, message)
 	}
 	if len(parsed.Choices) == 0 {
 		return contracts.CompletionResult{}, fmt.Errorf("openrouter response did not include choices")
@@ -280,4 +283,45 @@ func normalizeOpenRouterContent(content any) string {
 	default:
 		return ""
 	}
+}
+
+func classifyHTTPError(statusCode int, message string) error {
+	normalizedMessage := strings.TrimSpace(message)
+	if normalizedMessage == "" {
+		normalizedMessage = fmt.Sprintf("provider request failed with status %d", statusCode)
+	}
+
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return &Error{
+			Code:      ErrorCodeAuthFailed,
+			Message:   normalizedMessage,
+			Retryable: false,
+		}
+	case http.StatusTooManyRequests:
+		return &Error{
+			Code:      ErrorCodeProviderRequestFailed,
+			Message:   normalizedMessage,
+			Retryable: true,
+		}
+	case http.StatusBadRequest, http.StatusNotFound:
+		if looksLikeInvalidModel(normalizedMessage) {
+			return &Error{
+				Code:      ErrorCodeInvalidModel,
+				Message:   normalizedMessage,
+				Retryable: false,
+			}
+		}
+	}
+
+	return &Error{
+		Code:      ErrorCodeProviderRequestFailed,
+		Message:   normalizedMessage,
+		Retryable: statusCode >= 500,
+	}
+}
+
+func looksLikeInvalidModel(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(lower, "model") && (strings.Contains(lower, "invalid") || strings.Contains(lower, "not found") || strings.Contains(lower, "unsupported"))
 }

@@ -938,6 +938,16 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 	if model == "" {
 		model = profile.DefaultModel
 	}
+	if err := e.providers.ValidateModel(context.Background(), profile, model); err != nil {
+		category, code, outcome, retryable, assistantMessage := classifyProviderFailure(err)
+		if emitErr := e.emitFailureDetailedLocked(record, turnID, commandID, category, code, err, outcome, retryable); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          outcome,
+			AssistantMessage: assistantMessage,
+		}, nil
+	}
 
 	completion, err := e.providers.Complete(context.Background(), profile, contracts.CompletionRequest{
 		TurnID: turnID,
@@ -950,12 +960,13 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 		},
 	})
 	if err != nil {
-		if emitErr := e.emitFailureLocked(record, turnID, commandID, contracts.FailureCategoryProvider, "provider_completion_failed", err, contracts.TerminalOutcomeProviderFailure); emitErr != nil {
+		category, code, outcome, retryable, assistantMessage := classifyProviderFailure(err)
+		if emitErr := e.emitFailureDetailedLocked(record, turnID, commandID, category, code, err, outcome, retryable); emitErr != nil {
 			return turnResult{}, emitErr
 		}
 		return turnResult{
-			Outcome:          contracts.TerminalOutcomeProviderFailure,
-			AssistantMessage: fmt.Sprintf("Provider execution failed: %v", err),
+			Outcome:          outcome,
+			AssistantMessage: assistantMessage,
 		}, nil
 	}
 
@@ -1134,6 +1145,10 @@ func (e *InMemoryEngine) emitTurnFailureLocked(record *sessionRecord, turnID str
 }
 
 func (e *InMemoryEngine) emitFailureLocked(record *sessionRecord, turnID string, commandID string, category contracts.FailureCategory, code string, cause error, outcome contracts.TerminalOutcome) error {
+	return e.emitFailureDetailedLocked(record, turnID, commandID, category, code, cause, outcome, false)
+}
+
+func (e *InMemoryEngine) emitFailureDetailedLocked(record *sessionRecord, turnID string, commandID string, category contracts.FailureCategory, code string, cause error, outcome contracts.TerminalOutcome, retryable bool) error {
 	if _, err := e.appendEventLocked(record, contracts.EventKindFailure, contracts.SessionEventPayload{
 		CommandID: commandID,
 		TurnID:    turnID,
@@ -1141,7 +1156,7 @@ func (e *InMemoryEngine) emitFailureLocked(record *sessionRecord, turnID string,
 			Category:  category,
 			Code:      code,
 			Message:   cause.Error(),
-			Retryable: false,
+			Retryable: retryable,
 		},
 	}); err != nil {
 		return err
@@ -1211,4 +1226,22 @@ func (e *InMemoryEngine) buildProfileStatus(ctx context.Context, profile contrac
 		}
 	}
 	return status, nil
+}
+
+func classifyProviderFailure(err error) (contracts.FailureCategory, string, contracts.TerminalOutcome, bool, string) {
+	providerErr := provider.AsError(err)
+	if providerErr == nil {
+		return contracts.FailureCategoryProvider, "provider_completion_failed", contracts.TerminalOutcomeProviderFailure, false, fmt.Sprintf("Provider execution failed: %v", err)
+	}
+
+	switch providerErr.Code {
+	case provider.ErrorCodeInvalidModel:
+		return contracts.FailureCategoryProvider, string(provider.ErrorCodeInvalidModel), contracts.TerminalOutcomeValidationFailure, providerErr.Retryable, fmt.Sprintf("Invalid model: %s", providerErr.Message)
+	case provider.ErrorCodeAuthUnavailable, provider.ErrorCodeAuthFailed:
+		return contracts.FailureCategoryAuth, string(providerErr.Code), contracts.TerminalOutcomeProviderFailure, providerErr.Retryable, fmt.Sprintf("Provider auth failed: %s", providerErr.Message)
+	case provider.ErrorCodeProviderRequestFailed:
+		fallthrough
+	default:
+		return contracts.FailureCategoryProvider, string(providerErr.Code), contracts.TerminalOutcomeProviderFailure, providerErr.Retryable, fmt.Sprintf("Provider execution failed: %s", providerErr.Message)
+	}
 }

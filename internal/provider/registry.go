@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
 )
@@ -83,10 +84,43 @@ func (r *Registry) Complete(ctx context.Context, profile contracts.AuthProfile, 
 	return adapter.Complete(ctx, profile, req)
 }
 
+func (r *Registry) ValidateModel(ctx context.Context, profile contracts.AuthProfile, model string) error {
+	if strings.TrimSpace(model) == "" {
+		return nil
+	}
+	if allowsCustomModel(profile.Provider) {
+		return nil
+	}
+
+	models, err := r.ListModels(ctx, profile)
+	if err != nil {
+		return err
+	}
+	for _, supported := range models {
+		if strings.EqualFold(strings.TrimSpace(supported), strings.TrimSpace(model)) {
+			return nil
+		}
+	}
+	return &Error{
+		Code:      ErrorCodeInvalidModel,
+		Message:   fmt.Sprintf("model %q is not available for provider %s", model, profile.Provider),
+		Retryable: false,
+	}
+}
+
 func (r *Registry) StreamCompletion(ctx context.Context, profile contracts.AuthProfile, req contracts.CompletionRequest) (<-chan contracts.ProviderEvent, error) {
 	adapter, err := r.Get(profile.Provider)
 	if err != nil {
 		return nil, err
 	}
 	return adapter.StreamCompletion(ctx, profile, req)
+}
+
+func allowsCustomModel(kind contracts.ProviderKind) bool {
+	switch kind {
+	case contracts.ProviderOpenRouter:
+		return true
+	default:
+		return false
+	}
 }
