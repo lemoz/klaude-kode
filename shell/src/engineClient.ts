@@ -332,6 +332,38 @@ export async function loginAnthropic(
   return parsed.profiles ?? [];
 }
 
+export async function loginAnthropicOAuth(
+  config: Pick<ShellConfig, "stateRoot">,
+  input: {
+    defaultModel?: string;
+    apiBase?: string;
+    accountScope?: string;
+  },
+): Promise<ProfileStatus[]> {
+  const args = [
+    "-format=json",
+    "-anthropic-oauth-login",
+    "-profile-id=anthropic-main",
+    "-display-name=Anthropic Main",
+    "-make-default",
+    `-state-root=${config.stateRoot}`,
+  ];
+
+  if (input.defaultModel && input.defaultModel.trim() !== "") {
+    args.push(`-default-model=${input.defaultModel.trim()}`);
+  }
+  if (input.apiBase && input.apiBase.trim() !== "") {
+    args.push(`-api-base=${input.apiBase.trim()}`);
+  }
+  if (input.accountScope && input.accountScope.trim() !== "") {
+    args.push(`-account-scope=${input.accountScope.trim()}`);
+  }
+
+  const stdout = await runEngineAdminCommand(args, { inheritStderr: true });
+  const parsed = JSON.parse(stdout) as { profiles?: ProfileStatus[] };
+  return parsed.profiles ?? [];
+}
+
 function buildEngineArgs(config: ShellConfig): string[] {
   const args = [
     "run",
@@ -353,7 +385,10 @@ function buildEngineArgs(config: ShellConfig): string[] {
   return args;
 }
 
-async function runEngineAdminCommand(args: string[]): Promise<string> {
+async function runEngineAdminCommand(
+  args: string[],
+  options?: { inheritStderr?: boolean },
+): Promise<string> {
   const child = spawn("go", ["run", "./cmd/cc-engine", ...args], {
     cwd: repoRoot,
     env: process.env,
@@ -370,7 +405,11 @@ async function runEngineAdminCommand(args: string[]): Promise<string> {
     stdoutChunks.push(Buffer.from(chunk));
   });
   child.stderr.on("data", (chunk: Buffer | string) => {
-    stderrChunks.push(Buffer.from(chunk));
+    const buffer = Buffer.from(chunk);
+    stderrChunks.push(buffer);
+    if (options?.inheritStderr) {
+      process.stderr.write(buffer);
+    }
   });
 
   const exitCode = await new Promise<number>((resolve, reject) => {

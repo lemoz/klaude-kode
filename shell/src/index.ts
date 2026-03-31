@@ -7,6 +7,7 @@ import {
   makeCloseSessionCommand,
   makeDenyPermissionCommand,
   loginAnthropic,
+  loginAnthropicOAuth,
   listProfiles,
   loginOpenRouter,
   makeUpdateSessionSettingCommand,
@@ -192,6 +193,21 @@ async function runInteractiveLoop(
           renderProfiles(ui, profiles);
           const decisionVersion = ui.decisionVersion();
           await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-api"));
+          await ui.waitForDecision(decisionVersion);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "login_anthropic_oauth") {
+          ui.writeLine("login: opening browser for Anthropic OAuth");
+          const profiles = await loginAnthropicOAuth(config, {
+            defaultModel: slashCommand.defaultModel,
+            apiBase: slashCommand.apiBase,
+            accountScope: slashCommand.accountScope,
+          });
+          ui.writeLine("login: saved anthropic-main and set it as default");
+          renderProfiles(ui, profiles);
+          const decisionVersion = ui.decisionVersion();
+          await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-main"));
           await ui.waitForDecision(decisionVersion);
           ui.showPrompt(ui.currentPrompt());
           continue;
@@ -393,6 +409,7 @@ function parseSlashCommand(
   | { kind: "profiles" }
   | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
   | { kind: "login_anthropic"; credential: string; defaultModel?: string; apiBase?: string }
+  | { kind: "login_anthropic_oauth"; defaultModel?: string; apiBase?: string; accountScope?: string }
   | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith("/")) {
@@ -425,24 +442,54 @@ function parseLoginCommand(
 ):
   | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
   | { kind: "login_anthropic"; credential: string; defaultModel?: string; apiBase?: string }
+  | { kind: "login_anthropic_oauth"; defaultModel?: string; apiBase?: string; accountScope?: string }
   | null {
   const parts = line.split(/\s+/).slice(1);
   if (parts.length < 2) {
-    throw new Error("usage: /login <openrouter|anthropic> <env-var|credential-ref> [model=<id>] [api_base=<url>]");
+    throw new Error("usage: /login anthropic oauth [model=<id>] [account_scope=claude|console] [api_base=<url>] | /login <openrouter|anthropic> <env-var|credential-ref> [model=<id>] [api_base=<url>]");
   }
   const provider = parts[0]?.toLowerCase();
   if (provider !== "openrouter" && provider !== "anthropic") {
     throw new Error(`unsupported login provider: ${parts[0]}`);
   }
 
+  let defaultModel: string | undefined;
+  let apiBase: string | undefined;
+  let accountScope: string | undefined;
   const credential = parts[1] ?? "";
+  const optionTokens = provider === "anthropic" && credential.toLowerCase() === "oauth"
+    ? parts.slice(2)
+    : parts.slice(2);
+
+  if (provider === "anthropic" && credential.toLowerCase() === "oauth") {
+    for (const token of optionTokens) {
+      if (token.startsWith("model=")) {
+        defaultModel = token.slice("model=".length);
+        continue;
+      }
+      if (token.startsWith("api_base=")) {
+        apiBase = token.slice("api_base=".length);
+        continue;
+      }
+      if (token.startsWith("account_scope=")) {
+        accountScope = token.slice("account_scope=".length);
+        continue;
+      }
+      throw new Error(`unsupported login option: ${token}`);
+    }
+    return {
+      kind: "login_anthropic_oauth",
+      defaultModel,
+      apiBase,
+      accountScope,
+    };
+  }
+
   if (credential.trim() === "") {
     throw new Error("usage: /login <openrouter|anthropic> <env-var|credential-ref> [model=<id>] [api_base=<url>]");
   }
 
-  let defaultModel: string | undefined;
-  let apiBase: string | undefined;
-  for (const token of parts.slice(2)) {
+  for (const token of optionTokens) {
     if (token.startsWith("model=")) {
       defaultModel = token.slice("model=".length);
       continue;
@@ -507,6 +554,7 @@ function printHelp(): void {
     "  /profiles",
     "  /profile <id>",
     "  /model <id>",
+    "  /login anthropic oauth [model=<id>] [account_scope=claude|console] [api_base=<url>]",
     "  /login anthropic <env-var|credential-ref> [model=<id>] [api_base=<url>]",
     "  /login openrouter <env-var|credential-ref> [model=<id>] [api_base=<url>]",
   ];
