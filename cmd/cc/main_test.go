@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,6 +250,43 @@ func TestRunExportReplayPackText(t *testing.T) {
 	}
 	if !strings.Contains(output, "events: 10") {
 		t.Fatalf("expected event count in replay output, got %q", output)
+	}
+}
+
+func TestRunValidateCandidateText(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"cmd/cc", "cmd/cc-engine", "shell", "docs"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatalf("MkdirAll returned error: %v", err)
+		}
+	}
+	for _, file := range []string{
+		"cmd/cc/main.go",
+		"cmd/cc-engine/main.go",
+		"shell/package.json",
+		"docs/05-roadmap.md",
+	} {
+		if err := os.WriteFile(filepath.Join(root, file), []byte("stub"), 0o644); err != nil {
+			t.Fatalf("WriteFile returned error: %v", err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := run([]string{
+		"-validate-candidate",
+		"-cwd=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc candidate validation") {
+		t.Fatalf("expected validation header, got %q", output)
+	}
+	if !strings.Contains(output, "valid: true") {
+		t.Fatalf("expected valid candidate output, got %q", output)
 	}
 }
 
