@@ -178,6 +178,11 @@ async function runInteractiveLoop(
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
+        if (slashCommand?.kind === "status") {
+          renderStatus(ui, config, ui.currentState());
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
         if (slashCommand?.kind === "models") {
           const catalog = await listModels(
             config,
@@ -470,6 +475,7 @@ function parseSlashCommand(
 ):
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
   | { kind: "profiles" }
+  | { kind: "status" }
   | { kind: "models"; profileId?: string }
   | { kind: "logout"; profileId: string }
   | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
@@ -483,6 +489,9 @@ function parseSlashCommand(
 
   if (trimmed === "/profiles") {
     return { kind: "profiles" };
+  }
+  if (trimmed === "/status") {
+    return { kind: "status" };
   }
   if (trimmed === "/models") {
     return { kind: "models" };
@@ -636,6 +645,29 @@ function renderProfiles(
   }
 }
 
+function renderStatus(
+  ui: ReturnType<typeof createRenderer>,
+  config: ShellConfig,
+  state: SessionStateSnapshot | null,
+): void {
+  ui.writeLine("status:");
+  ui.writeLine(`- session: ${config.resumeSessionId || config.sessionId}`);
+  if (!state) {
+    ui.writeLine("  state: unavailable");
+    return;
+  }
+  ui.writeLine(`  mode: ${state.mode}`);
+  ui.writeLine(`  status: ${state.status}`);
+  ui.writeLine(`  profile: ${state.profile_id}`);
+  ui.writeLine(`  model: ${state.model}`);
+  ui.writeLine(`  turns: ${state.turn_count}`);
+  ui.writeLine(`  events: ${state.event_count}`);
+  ui.writeLine(`  terminal_outcome: ${state.terminal_outcome || "none"}`);
+  if (state.closed_reason !== "") {
+    ui.writeLine(`  closed_reason: ${state.closed_reason}`);
+  }
+}
+
 function renderModelCatalog(
   ui: ReturnType<typeof createRenderer>,
   catalog: Awaited<ReturnType<typeof listModels>>,
@@ -709,6 +741,7 @@ function printHelp(): void {
     "",
     "Interactive commands:",
     "  /profiles",
+    "  /status",
     "  /models [profile-id]",
     "  /logout [anthropic|openrouter]",
     "  /profile <id>",
