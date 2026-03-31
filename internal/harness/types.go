@@ -2,6 +2,11 @@ package harness
 
 import "time"
 
+const (
+	EvalRunStatusCompleted = "completed"
+	EvalRunStatusFailed    = "failed"
+)
+
 type CandidateBundle struct {
 	SchemaVersion    string    `json:"schema_version"`
 	CreatedAt        time.Time `json:"created_at"`
