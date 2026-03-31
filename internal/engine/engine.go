@@ -22,6 +22,7 @@ type Engine interface {
 	ListSessions(ctx context.Context) ([]contracts.SessionSummary, error)
 	ListProfiles(ctx context.Context) ([]contracts.ProfileStatus, error)
 	SaveProfile(ctx context.Context, profile contracts.AuthProfile, makeDefault bool) (contracts.ProfileStatus, error)
+	LogoutProfile(ctx context.Context, profileID string) (contracts.ProfileStatus, error)
 	GetSessionSummary(ctx context.Context, sessionID string) (contracts.SessionSummary, error)
 	ResumeSession(ctx context.Context, req contracts.ResumeSessionRequest) (contracts.SessionHandle, error)
 	CloseSession(ctx context.Context, sessionID string, reason string) error
@@ -316,6 +317,23 @@ func (e *InMemoryEngine) SaveProfile(ctx context.Context, profile contracts.Auth
 		}
 	}
 	return status, nil
+}
+
+func (e *InMemoryEngine) LogoutProfile(ctx context.Context, profileID string) (contracts.ProfileStatus, error) {
+	if e.profileStore == nil {
+		return contracts.ProfileStatus{}, fmt.Errorf("profile store is unavailable")
+	}
+
+	profile, err := e.profileStore.GetProfile(strings.TrimSpace(profileID))
+	if err != nil {
+		return contracts.ProfileStatus{}, err
+	}
+	profile.Settings = clearedProfileAuthSettings(profile)
+
+	if err := e.profileStore.SaveProfile(profile); err != nil {
+		return contracts.ProfileStatus{}, err
+	}
+	return e.buildProfileStatus(ctx, profile)
 }
 
 func (e *InMemoryEngine) GetSessionSummary(_ context.Context, sessionID string) (contracts.SessionSummary, error) {
@@ -1278,6 +1296,28 @@ func (e *InMemoryEngine) buildProfileStatus(ctx context.Context, profile contrac
 		}
 	}
 	return status, nil
+}
+
+func clearedProfileAuthSettings(profile contracts.AuthProfile) map[string]string {
+	if len(profile.Settings) == 0 {
+		return map[string]string{}
+	}
+
+	cleared := make(map[string]string, len(profile.Settings))
+	for key, value := range profile.Settings {
+		cleared[key] = value
+	}
+	for _, key := range []string{
+		"credential_ref",
+		"api_key",
+		"access_token",
+		"oauth_access_token",
+		"oauth_refresh_token",
+		"oauth_expires_at",
+	} {
+		delete(cleared, key)
+	}
+	return cleared
 }
 
 func classifyProviderFailure(err error) (contracts.FailureCategory, string, contracts.TerminalOutcome, bool, string) {

@@ -31,6 +31,7 @@ type config struct {
 	ListProfiles    bool
 	UpsertProfile   bool
 	AnthropicOAuthLogin bool
+	LogoutProfileID string
 	Prompt          string
 	SessionID       string
 	ResumeSessionID string
@@ -106,6 +107,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return loginAnthropicOAuthAndRenderCatalog(ctx, runtime, cfg, stdout, stderr)
 	}
+	if cfg.LogoutProfileID != "" {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-logout-profile does not support -format=events")
+		}
+		return logoutProfileAndRenderCatalog(ctx, runtime, cfg, stdout)
+	}
 
 	if cfg.Transport == "stdio" {
 		if cfg.Format != outputFormatEvents {
@@ -138,6 +145,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
 	anthropicOAuthLoginValue := fs.Bool("anthropic-oauth-login", false, "log in with Anthropic OAuth and save the resulting profile")
+	logoutProfileValue := fs.String("logout-profile", "", "clear stored auth from the specified profile and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc-engine", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "engine-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -180,6 +188,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ListProfiles:    *listProfilesValue,
 		UpsertProfile:   *upsertProfileValue,
 		AnthropicOAuthLogin: *anthropicOAuthLoginValue,
+		LogoutProfileID: strings.TrimSpace(*logoutProfileValue),
 		Prompt:          strings.TrimSpace(*promptValue),
 		SessionID:       strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID: strings.TrimSpace(*resumeSessionValue),
@@ -472,6 +481,13 @@ func loginAnthropicOAuthAndRenderCatalog(ctx context.Context, runtime engine.Eng
 		return err
 	}
 	if _, err := runtime.SaveProfile(ctx, result.Profile, cfg.MakeDefault); err != nil {
+		return err
+	}
+	return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)
+}
+
+func logoutProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
+	if _, err := runtime.LogoutProfile(ctx, cfg.LogoutProfileID); err != nil {
 		return err
 	}
 	return renderProfileCatalog(ctx, runtime, cfg.Format, stdout)

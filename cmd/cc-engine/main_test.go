@@ -10,6 +10,7 @@ import (
 
 	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
+	"github.com/cdossman/klaude-kode/internal/engine"
 )
 
 func TestRunJSONFormat(t *testing.T) {
@@ -263,6 +264,57 @@ func TestRunAnthropicOAuthLoginSavesDefaultProfile(t *testing.T) {
 	}
 	if got.Session.ProfileID != "anthropic-main" {
 		t.Fatalf("expected anthropic-main as saved default, got %s", got.Session.ProfileID)
+	}
+}
+
+func TestRunLogoutProfileClearsStoredAnthropicOAuthTokens(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	runtime, err := engine.NewFileBackedEngine(root)
+	if err != nil {
+		t.Fatalf("NewFileBackedEngine returned error: %v", err)
+	}
+	if _, err := runtime.SaveProfile(context.Background(), contracts.AuthProfile{
+		ID:           "anthropic-main",
+		Kind:         contracts.AuthProfileAnthropicOAuth,
+		Provider:     contracts.ProviderAnthropic,
+		DisplayName:  "Anthropic Main",
+		DefaultModel: "claude-sonnet-4-6",
+		Settings: map[string]string{
+			"oauth_host":          "https://claude.ai",
+			"account_scope":       "claude",
+			"oauth_access_token":  "oauth-access",
+			"oauth_refresh_token": "oauth-refresh",
+			"oauth_expires_at":    "9999999999",
+			"oauth_client_id":     "client-id",
+		},
+	}, false); err != nil {
+		t.Fatalf("SaveProfile returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{
+		"-format=json",
+		"-logout-profile=anthropic-main",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("logout profile run returned error: %v", err)
+	}
+
+	var catalog profileCatalogResult
+	if err := json.Unmarshal(stdout.Bytes(), &catalog); err != nil {
+		t.Fatalf("failed to parse logout catalog: %v", err)
+	}
+	if len(catalog.Profiles) == 0 {
+		t.Fatalf("expected profile catalog after logout")
+	}
+	if catalog.Profiles[0].Validation.Valid {
+		t.Fatalf("expected logged out anthropic profile to be invalid until relogin")
 	}
 }
 

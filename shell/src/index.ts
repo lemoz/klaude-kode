@@ -8,6 +8,7 @@ import {
   makeDenyPermissionCommand,
   loginAnthropic,
   loginAnthropicOAuth,
+  logoutProfile,
   listProfiles,
   loginOpenRouter,
   makeUpdateSessionSettingCommand,
@@ -165,6 +166,13 @@ async function runInteractiveLoop(
         }
         if (slashCommand?.kind === "profiles") {
           const profiles = await listProfiles(config);
+          renderProfiles(ui, profiles);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "logout") {
+          const profiles = await logoutProfile(config, slashCommand.profileId);
+          ui.writeLine(`logout: cleared stored auth for ${slashCommand.profileId}`);
           renderProfiles(ui, profiles);
           ui.showPrompt(ui.currentPrompt());
           continue;
@@ -407,6 +415,7 @@ function parseSlashCommand(
 ):
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
   | { kind: "profiles" }
+  | { kind: "logout"; profileId: string }
   | { kind: "login_openrouter"; credential: string; defaultModel?: string; apiBase?: string }
   | { kind: "login_anthropic"; credential: string; defaultModel?: string; apiBase?: string }
   | { kind: "login_anthropic_oauth"; defaultModel?: string; apiBase?: string; accountScope?: string }
@@ -418,6 +427,19 @@ function parseSlashCommand(
 
   if (trimmed === "/profiles") {
     return { kind: "profiles" };
+  }
+  if (trimmed === "/logout" || trimmed === "/logout anthropic") {
+    return { kind: "logout", profileId: "anthropic-main" };
+  }
+  if (trimmed.startsWith("/logout ")) {
+    const raw = trimmed.slice("/logout ".length).trim().toLowerCase();
+    if (raw === "anthropic" || raw === "anthropic-main") {
+      return { kind: "logout", profileId: "anthropic-main" };
+    }
+    if (raw === "openrouter" || raw === "openrouter-main") {
+      return { kind: "logout", profileId: "openrouter-main" };
+    }
+    throw new Error("usage: /logout [anthropic|openrouter]");
   }
   if (trimmed.startsWith("/model ")) {
     const value = trimmed.slice("/model ".length).trim();
@@ -552,6 +574,7 @@ function printHelp(): void {
     "",
     "Interactive commands:",
     "  /profiles",
+    "  /logout [anthropic|openrouter]",
     "  /profile <id>",
     "  /model <id>",
     "  /login anthropic oauth [model=<id>] [account_scope=claude|console] [api_base=<url>]",

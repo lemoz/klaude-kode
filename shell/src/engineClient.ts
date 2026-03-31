@@ -268,6 +268,19 @@ export async function listProfiles(config: Pick<ShellConfig, "stateRoot">): Prom
   return parsed.profiles ?? [];
 }
 
+export async function logoutProfile(
+  config: Pick<ShellConfig, "stateRoot">,
+  profileID: string,
+): Promise<ProfileStatus[]> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    `-logout-profile=${profileID}`,
+    `-state-root=${config.stateRoot}`,
+  ]);
+  const parsed = JSON.parse(stdout) as { profiles?: ProfileStatus[] };
+  return parsed.profiles ?? [];
+}
+
 export async function loginOpenRouter(
   config: Pick<ShellConfig, "stateRoot">,
   input: {
