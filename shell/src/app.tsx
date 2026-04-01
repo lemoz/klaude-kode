@@ -38,10 +38,22 @@ export interface InteractivePromptState {
   editable: boolean;
 }
 
+export interface ArtifactSection {
+  title: string;
+  lines: string[];
+}
+
+export interface ArtifactView {
+  title: string;
+  summary: string[];
+  sections: ArtifactSection[];
+}
+
 export interface InteractiveShellProps {
   header: InteractiveShellHeader;
   footer: InteractiveShellFooter;
   hints: string[];
+  artifactView: ArtifactView | null;
   turns: TranscriptTurn[];
   lines: string[];
   pendingPermission: PermissionEventPayload | null;
@@ -85,6 +97,24 @@ export function InteractiveShell(props: InteractiveShellProps) {
           ))}
         </Box>
       </Box>
+      {props.artifactView ? (
+        <Box borderStyle="round" borderColor={SHELL_THEME.activity} paddingX={1} flexDirection="column" marginTop={1}>
+          <Text color={SHELL_THEME.activity}>{props.artifactView.title}</Text>
+          {props.artifactView.summary.map((line, index) => (
+            <Text key={`${props.artifactView?.title}:summary:${index}`}>{line}</Text>
+          ))}
+          {props.artifactView.sections.map((section, sectionIndex) => (
+            <Box key={`${props.artifactView?.title}:section:${sectionIndex}`} flexDirection="column" marginTop={1}>
+              <Text color={SHELL_THEME.brand}>{section.title}</Text>
+              {section.lines.map((line, lineIndex) => (
+                <Text key={`${section.title}:${lineIndex}`} dimColor>
+                  {line}
+                </Text>
+              ))}
+            </Box>
+          ))}
+        </Box>
+      ) : null}
       <Box flexDirection="column" marginTop={1}>
         {props.turns.map((turn) => {
           const assistantText = turn.assistantFinal || turn.assistantStream;

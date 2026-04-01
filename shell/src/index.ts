@@ -39,6 +39,7 @@ import {
   type FrontierEntry,
 } from "./engineClient.js";
 import {
+  type ArtifactView,
   InteractiveShell,
   type InteractiveShellFooter,
   type InteractiveShellHeader,
@@ -81,6 +82,7 @@ interface ShellUIController extends LineWriter {
   takePendingPermission(): PermissionEventPayload | undefined;
   setProfileStatuses(profiles: ProfileStatus[]): void;
   setActiveSurface(surface: ShellSurface): void;
+  setArtifactView(view: ArtifactView | null): void;
 }
 
 async function runPromptMode(config: ShellConfig): Promise<void> {
@@ -109,6 +111,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   let inputValue = "";
   let lines: string[] = [];
   let activeSurface: ShellSurface = "conversation";
+  let artifactView: ArtifactView | null = null;
 
   const appendLine = (line: string) => {
     lines = [...lines, line];
@@ -141,6 +144,10 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       activeSurface = surface;
       rerender();
     },
+    setArtifactView(view: ArtifactView | null): void {
+      artifactView = view;
+      rerender();
+    },
     writeLine(line: string): void {
       appendLine(line);
       rerender();
@@ -161,6 +168,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       header: renderHeader(),
       footer: renderFooter(),
       hints: renderHints(),
+      artifactView,
       turns: model.transcript(),
       lines,
       pendingPermission: ui.pendingPermission(),
@@ -336,6 +344,7 @@ async function handleShellInputLine(
   const slashCommand = parseSlashCommand(line);
   if (slashCommand?.kind === "setting") {
     ui.setActiveSurface("conversation");
+    ui.setArtifactView(null);
     const decisionVersion = ui.decisionVersion();
     await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
     await ui.waitForDecision(decisionVersion);
@@ -351,6 +360,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "profiles") {
     ui.setActiveSurface("profiles");
+    ui.setArtifactView(null);
     const profiles = await listProfiles(config);
     ui.setProfileStatuses(profiles);
     renderProfiles(ui, profiles, config.profileId);
@@ -358,60 +368,63 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "help") {
     ui.setActiveSurface("help");
+    ui.setArtifactView(null);
     renderHelp(ui);
     return;
   }
   if (slashCommand?.kind === "status") {
     ui.setActiveSurface("status");
+    ui.setArtifactView(null);
     renderStatus(ui, config, ui.currentState());
     return;
   }
   if (slashCommand?.kind === "summarize_runs") {
     ui.setActiveSurface("runs");
     const summary = await summarizeRuns(config);
-    renderRunSummary(ui, summary);
+    ui.setArtifactView(buildRunSummaryArtifact(summary));
     return;
   }
   if (slashCommand?.kind === "show_run") {
     ui.setActiveSurface("runs");
     const run = await showRun(config, slashCommand.runID);
-    renderEvalRun(ui, run);
+    ui.setArtifactView(buildEvalRunArtifact(run));
     return;
   }
   if (slashCommand?.kind === "list_frontier") {
     ui.setActiveSurface("frontier");
     const entries = await listFrontier(config, slashCommand.limit);
-    renderFrontier(ui, entries);
+    ui.setArtifactView(buildFrontierArtifact(entries));
     return;
   }
   if (slashCommand?.kind === "diff_runs") {
     ui.setActiveSurface("diff");
     const diff = await diffRuns(config, slashCommand.leftRunID, slashCommand.rightRunID);
-    renderRunDiff(ui, diff);
+    ui.setArtifactView(buildRunDiffArtifact(diff));
     return;
   }
   if (slashCommand?.kind === "validate_candidate") {
     ui.setActiveSurface("validation");
     const validation = await validateCandidate(config);
-    renderCandidateValidation(ui, validation);
+    ui.setArtifactView(buildCandidateValidationArtifact(validation));
     return;
   }
   if (slashCommand?.kind === "run_benchmark") {
     ui.setActiveSurface("benchmark_eval");
     const benchmarkPath = path.resolve(config.cwd, slashCommand.benchmarkPath);
     const evalRun = await runBenchmarkEval(config, benchmarkPath);
-    renderEvalRun(ui, evalRun);
+    ui.setArtifactView(buildEvalRunArtifact(evalRun));
     return;
   }
   if (slashCommand?.kind === "run_replay") {
     ui.setActiveSurface("replay_eval");
     const replayPath = path.resolve(config.cwd, slashCommand.replayPath);
     const evalRun = await runReplayEval(config, replayPath);
-    renderReplayEval(ui, evalRun);
+    ui.setArtifactView(buildEvalRunArtifact(evalRun));
     return;
   }
   if (slashCommand?.kind === "export_replay") {
     ui.setActiveSurface("replay_eval");
+    ui.setArtifactView(null);
     const targetPath = path.resolve(config.cwd, slashCommand.outputPath);
     const replayPack = await exportReplayPack(config);
     await mkdir(path.dirname(targetPath), { recursive: true });
@@ -421,6 +434,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "models") {
     ui.setActiveSurface("models");
+    ui.setArtifactView(null);
     const catalog = await listModels(
       config,
       slashCommand.profileId || config.profileId,
@@ -435,6 +449,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "logout") {
     ui.setActiveSurface("profiles");
+    ui.setArtifactView(null);
     const profiles = await logoutProfile(config, slashCommand.profileId);
     ui.setProfileStatuses(profiles);
     ui.writeLine(`auth: cleared stored credentials for ${slashCommand.profileId}`);
@@ -443,6 +458,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "login_openrouter") {
     ui.setActiveSurface("profiles");
+    ui.setArtifactView(null);
     const profiles = await loginOpenRouter(config, {
       credential: slashCommand.credential,
       defaultModel: slashCommand.defaultModel,
@@ -460,6 +476,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "login_anthropic") {
     ui.setActiveSurface("profiles");
+    ui.setArtifactView(null);
     const profiles = await loginAnthropic(config, {
       credential: slashCommand.credential,
       defaultModel: slashCommand.defaultModel,
@@ -477,6 +494,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "login_anthropic_oauth") {
     ui.setActiveSurface("profiles");
+    ui.setArtifactView(null);
     ui.writeLine("auth: opening browser for Anthropic OAuth");
     const profiles = await loginAnthropicOAuth(config, {
       defaultModel: slashCommand.defaultModel,
@@ -497,6 +515,7 @@ async function handleShellInputLine(
   const pendingPermission = ui.takePendingPermission();
   if (pendingPermission) {
     ui.setActiveSurface("conversation");
+    ui.setArtifactView(null);
     const decisionVersion = ui.decisionVersion();
     if (looksApproved(line)) {
       await session.sendCommand(
@@ -513,6 +532,7 @@ async function handleShellInputLine(
 
   const decisionVersion = ui.decisionVersion();
   ui.setActiveSurface("conversation");
+  ui.setArtifactView(null);
   await session.sendCommand(makeUserInputCommand(line, { askForPermission: true }));
   await ui.waitForDecision(decisionVersion);
 }
@@ -1151,6 +1171,140 @@ function renderHelp(ui: LineWriter): void {
   ui.writeLine("- harness: /validate-candidate | /run-replay <path> | /run-benchmark <path>");
   ui.writeLine("- reports: /summarize-runs | /show-run <id> | /list-frontier [limit] | /diff-runs <left> <right>");
   ui.writeLine("- export: /export-replay <path>");
+}
+
+function buildCandidateValidationArtifact(validation: CandidateValidationResult): ArtifactView {
+  return {
+    title: "Candidate Check",
+    summary: [
+      `valid=${validation.valid}`,
+      `root=${validation.candidate.root}`,
+    ],
+    sections: [
+      {
+        title: "Defaults",
+        lines: [
+          `engine_version=${validation.candidate.engine_version}`,
+          `shell_version=${validation.candidate.shell_version}`,
+          `default_profile=${validation.candidate.default_profile_id}`,
+          `default_model=${validation.candidate.default_model}`,
+        ],
+      },
+      {
+        title: "Issues",
+        lines: validation.issues && validation.issues.length > 0 ? validation.issues : ["none"],
+      },
+    ],
+  };
+}
+
+function buildRunSummaryArtifact(summary: EvalRunSummary): ArtifactView {
+  const failureCodes = Object.entries(summary.failure_codes ?? {}).map(([code, count]) => `${code}=${count}`);
+  return {
+    title: "Run Summary",
+    summary: [
+      `artifact_root=${summary.artifact_root}`,
+      `total=${summary.total_runs} completed=${summary.completed} failed=${summary.failed} average=${summary.average_score.toFixed(2)}`,
+    ],
+    sections: [
+      {
+        title: "Latest",
+        lines: [
+          `run=${summary.latest_run_id || "none"}`,
+          `status=${summary.latest_status || "none"}`,
+        ],
+      },
+      {
+        title: "Failure Codes",
+        lines: failureCodes.length > 0 ? failureCodes : ["none"],
+      },
+    ],
+  };
+}
+
+function buildEvalRunArtifact(evalRun: EvalRun): ArtifactView {
+  const sections = [];
+  if (evalRun.benchmark) {
+    sections.push({
+      title: "Benchmark",
+      lines: [
+        `name=${evalRun.benchmark.name}`,
+        `path=${evalRun.benchmark.path}`,
+        `cases=${evalRun.benchmark.case_count}`,
+      ],
+    });
+  }
+  if (evalRun.case_results && evalRun.case_results.length > 0) {
+    sections.push({
+      title: "Case Results",
+      lines: evalRun.case_results.map((result) =>
+        `${result.id} status=${result.status} score=${result.score.toFixed(2)}${result.failure ? ` failure=${result.failure.code}` : ""}`
+      ),
+    });
+  }
+  if (evalRun.failure) {
+    sections.push({
+      title: "Failure",
+      lines: [
+        `code=${evalRun.failure.code}`,
+        `message=${evalRun.failure.message}`,
+        `retryable=${evalRun.failure.retryable}`,
+      ],
+    });
+  }
+  return {
+    title: "Run Detail",
+    summary: [
+      `run=${evalRun.id}`,
+      `kind=${evalRun.kind} status=${evalRun.status} score=${evalRun.score.toFixed(2)}`,
+      `candidate_root=${evalRun.candidate.root}`,
+    ],
+    sections,
+  };
+}
+
+function buildFrontierArtifact(entries: FrontierEntry[]): ArtifactView {
+  return {
+    title: "Frontier",
+    summary: [`entries=${entries.length}`],
+    sections: [
+      {
+        title: "Top Runs",
+        lines: entries.length > 0
+          ? entries.map((entry) =>
+            `${entry.run_id} kind=${entry.kind} status=${entry.status} score=${entry.score.toFixed(2)}${entry.benchmark ? ` benchmark=${entry.benchmark}` : ""}${entry.failure_code ? ` failure=${entry.failure_code}` : ""}`
+          )
+          : ["none"],
+      },
+    ],
+  };
+}
+
+function buildRunDiffArtifact(diff: EvalRunDiff): ArtifactView {
+  return {
+    title: "Run Diff",
+    summary: [
+      `left=${diff.left_run_id} right=${diff.right_run_id}`,
+      `left_score=${diff.left_score.toFixed(2)} right_score=${diff.right_score.toFixed(2)} delta=${diff.score_delta.toFixed(2)}`,
+    ],
+    sections: [
+      {
+        title: "Status",
+        lines: [
+          `left=${diff.left_status}${diff.left_failure_code ? ` failure=${diff.left_failure_code}` : ""}`,
+          `right=${diff.right_status}${diff.right_failure_code ? ` failure=${diff.right_failure_code}` : ""}`,
+        ],
+      },
+      {
+        title: "Case Diffs",
+        lines: diff.case_diffs.length > 0
+          ? diff.case_diffs.map((entry) =>
+            `${entry.id} left=${entry.left_status}/${entry.left_score.toFixed(2)} right=${entry.right_status}/${entry.right_score.toFixed(2)} delta=${entry.score_delta.toFixed(2)}`
+          )
+          : ["none"],
+      },
+    ],
+  };
 }
 
 function renderStatus(
