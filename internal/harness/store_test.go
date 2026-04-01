@@ -100,3 +100,67 @@ func TestPersistEvalRunAppendsRunIndex(t *testing.T) {
 		t.Fatalf("expected failure details in indexed run, got %#v", runs[1])
 	}
 }
+
+func TestPersistEvalRunRoundTripsBenchmarkMetadata(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "artifacts")
+	run := EvalRun{
+		ID:            "benchmark_run_1",
+		Kind:          EvalRunKindBenchmark,
+		SchemaVersion: contracts.SchemaVersionV1,
+		Status:        EvalRunStatusFailed,
+		Score:         0.5,
+		Benchmark: &BenchmarkRunMetadata{
+			Name:        "baseline-pack",
+			Description: "baseline replay benchmark pack",
+			Path:        "/tmp/benchmark.json",
+			CaseCount:   2,
+		},
+		CaseResults: []BenchmarkCaseResult{
+			{
+				ID:         "case_one",
+				ReplayPath: "/tmp/replays/case-one.json",
+				Weight:     1,
+				Status:     EvalRunStatusCompleted,
+				Score:      1,
+			},
+			{
+				ID:         "case_two",
+				ReplayPath: "/tmp/replays/case-two.json",
+				Weight:     1,
+				Status:     EvalRunStatusFailed,
+				Score:      0,
+				Failure: &EvalFailureSummary{
+					Code:      "replay_terminal_outcome",
+					Message:   "replay pack terminal outcome is task_failure",
+					Retryable: false,
+				},
+			},
+		},
+		Failure: &EvalFailureSummary{
+			Code:      "benchmark_cases_failed",
+			Message:   "1 benchmark cases failed",
+			Retryable: false,
+		},
+	}
+
+	if _, err := PersistEvalRun(root, run); err != nil {
+		t.Fatalf("PersistEvalRun returned error: %v", err)
+	}
+
+	loaded, err := LoadEvalRun(root, run.ID)
+	if err != nil {
+		t.Fatalf("LoadEvalRun returned error: %v", err)
+	}
+	if loaded.Kind != EvalRunKindBenchmark {
+		t.Fatalf("expected benchmark run kind, got %#v", loaded)
+	}
+	if loaded.Benchmark == nil || loaded.Benchmark.Name != run.Benchmark.Name {
+		t.Fatalf("expected benchmark metadata to round-trip, got %#v", loaded)
+	}
+	if len(loaded.CaseResults) != 2 {
+		t.Fatalf("expected case results to round-trip, got %#v", loaded)
+	}
+	if loaded.CaseResults[1].Failure == nil || loaded.CaseResults[1].Failure.Code != "replay_terminal_outcome" {
+		t.Fatalf("expected case failure to round-trip, got %#v", loaded)
+	}
+}
