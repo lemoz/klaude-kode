@@ -1,0 +1,51 @@
+{
+  "schema_version": "v1",
+  "exported_at": "2026-03-31T00:00:00Z",
+  "session": {
+    "session_id": "fixture-pass-basic",
+    "cwd": "/fixtures/pass-basic",
+    "mode": "headless",
+    "profile_id": "anthropic-main",
+    "model": "claude-sonnet-4-6",
+    "created_at": "2026-03-31T00:00:00Z"
+  },
+  "summary": {
+    "session_id": "fixture-pass-basic",
+    "cwd": "/fixtures/pass-basic",
+    "mode": "headless",
+    "status": "closed",
+    "profile_id": "anthropic-main",
+    "model": "claude-sonnet-4-6",
+    "created_at": "2026-03-31T00:00:00Z",
+    "updated_at": "2026-03-31T00:00:01Z",
+    "event_count": 1,
+    "turn_count": 1,
+    "last_sequence": 1,
+    "last_event_kind": "session_closed",
+    "closed_reason": "fixture_complete",
+    "terminal_outcome": "success"
+  },
+  "events": [
+    {
+      "schema_version": "v1",
+      "session_id": "fixture-pass-basic",
+      "sequence": 1,
+      "timestamp": "2026-03-31T00:00:01Z",
+      "kind": "session_closed",
+      "payload": {
+        "command_id": "",
+        "turn_id": "",
+        "source": "",
+        "message": null,
+        "state": null,
+        "tool": null,
+        "permission": null,
+        "lifecycle_name": "",
+        "terminal_outcome": "",
+        "warning": "",
+        "failure": null,
+        "reason": "fixture_complete"
+      }
+    }
+  ]
+}
