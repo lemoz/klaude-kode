@@ -6,7 +6,8 @@
   "scripts": {
     "check": "tsc --noEmit",
     "cleanup:smokes": "../scripts/cleanup-shell-smokes.sh",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "smoke:tmux": "../scripts/smoke-shell-ui.sh"
   },
   "dependencies": {
     "ink": "^5.2.1",
