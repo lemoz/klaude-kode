@@ -109,9 +109,12 @@ missing verification is called out explicitly in the commit/push handoff.
 
 - TS/Ink shell wired to `cc-engine`
 - interactive prompt and streaming transcript
+- prompt/footer/status presentation
 - permission dialogs
 - basic slash-command routing
 - model/profile switching
+- command discoverability and help affordances
+- Klaude Kode shell branding and visual system
 
 ### Deliverables
 
@@ -119,14 +122,44 @@ missing verification is called out explicitly in the commit/push handoff.
 - shell projections of engine state
 - artifact-aware rendering for diffs and large outputs
 - Klaude Kode-branded shell presentation over a familiar Claude Code-like flow
+- an explicit UX parity track for layout, status context, permissions, and
+  shell discoverability
+
+### UX Track
+
+Phase 2 is not only transport wiring. It is the point where the familiar
+day-to-day Claude Code workflow gets re-expressed as Klaude Kode.
+
+Preserve at the interaction level:
+
+- prompt and transcript rhythm
+- streamed assistant output behavior
+- visible session context such as model/profile/status
+- permission prompt timing and decision flow
+- command discoverability for common workflows
+
+Rebrand at the product level:
+
+- shell copy tone
+- command/help copy
+- naming and framing
+- visual styling and layout treatment
+
+Do not require:
+
+- pixel-perfect visual cloning
+- exact spacing/color/token reproduction
+- one-to-one reproduction of every Claude Code visual affordance
 
 ### Step Sequence
 
 1. engine transport client in the shell
 2. interactive prompt and streaming transcript
-3. permission dialogs
-4. slash-command routing and model/profile controls
-5. artifact-aware renderers
+3. prompt/footer/status context and shell chrome
+4. permission dialogs
+5. slash-command routing, help, and model/profile controls
+6. artifact-aware renderers
+7. Klaude Kode branding and UX polish pass
 
 ### Verification Per Step
 
@@ -135,12 +168,16 @@ missing verification is called out explicitly in the commit/push handoff.
 - manually exercise the updated UI flow against `cc-engine`
 - verify the changed flow stays familiar while the surface presentation remains
   distinctly Klaude Kode
+- when the step changes interaction behavior, verify transcript layout, prompt
+  behavior, and help/discoverability together rather than in isolation
 
 ### Exit Criteria
 
 - shell contains no session source of truth
 - local interactive workflows reach parity for common usage
 - the shell is recognizably rebranded rather than a visual clone
+- prompt, transcript, status, permission, and help flows feel cohesive as one
+  product experience rather than a collection of shell commands
 
 ## 6. Phase 3: Provider Expansion
 

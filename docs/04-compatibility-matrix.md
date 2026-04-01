@@ -11,12 +11,15 @@ UI/UX parity policy:
 - preserve the recognizable interaction model and workflow shape
 - do not require exact visual reproduction
 - apply a distinct Klaude Kode rebrand in copy, naming, and styling
+- treat transcript layout, prompt/status context, permission timing, and help
+  discoverability as first-class parity surfaces
 
 ## 2. Preserve
 
 | Area | Current Anchor | Decision | Notes |
 | --- | --- | --- | --- |
 | Local interactive REPL | `src/screens/REPL.tsx` | preserve | Same core UX: prompt, streaming output, tools, permissions, resume |
+| Transcript and status context | `src/components/App.tsx`, `src/screens/REPL.tsx` | preserve | Prompt rhythm, streamed output shape, visible session context, terminal state cues |
 | Headless print/json/stream modes | `src/main.tsx`, `src/cli/print.ts` | preserve | Same user-facing modes with engine-native event streaming |
 | Turn loop semantics | `src/query.ts` | preserve | Compaction, tool loop, retries, budget, turn terminality |
 | Builtin tools | `src/tools` | preserve | Same behavioral tool surface, reorganized under `ToolRuntime` |
@@ -25,6 +28,7 @@ UI/UX parity policy:
 | Resume/session history | `src/history.ts`, resume flows in `src/main.tsx` | preserve | Replay-driven instead of ad hoc restore state |
 | Remote/assistant/direct-connect/SSH | `src/main.tsx`, `src/remote/*` | preserve | Same user concepts, unified transport model |
 | Slash commands | `src/commands.ts` | preserve | Major user-facing commands remain |
+| Help and discoverability | `src/commands/help`, command/status surfaces | preserve | Common workflows must stay learnable without reading source or hidden docs |
 | Hooks/skills/plugins | `src/commands/hooks`, `src/skills`, `src/plugins` | preserve | Same top-level concepts with cleaner manifest/runtime split |
 | Config precedence and managed policy | `src/utils/managedEnv.ts`, `src/services/policyLimits` | preserve | Same user expectations, simpler implementation |
 | Telemetry, retries, compaction, budgets | `src/query.ts`, `src/services/api/*`, `src/services/analytics/*` | preserve | Same behaviorally visible outcomes, moved behind engine services |
@@ -55,6 +59,7 @@ These are explicitly not required for parity:
 | Environment-variable quirks whose only purpose was rollout compatibility | replace with explicit profile and policy configuration |
 | UI-level ownership of session truth | replaced with engine-owned state |
 | Exact Claude Code visual styling | replaced with Klaude Kode branding over similar workflow patterns |
+| Pixel-perfect recreation of Claude Code spacing, tokens, or micro-layout | preserve workflow feel instead of exact visual duplication |
 
 ## 5. Slash Command Policy
 
