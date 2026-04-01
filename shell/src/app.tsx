@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { Box, Static, Text, useApp } from "ink";
+import type { TranscriptTurn } from "./presentation.js";
 
 export interface InteractiveShellHeader {
   sessionId: string;
@@ -12,6 +13,7 @@ export interface InteractiveShellHeader {
 
 export interface InteractiveShellProps {
   header: InteractiveShellHeader;
+  turns: TranscriptTurn[];
   lines: string[];
   promptLabel: string;
   inputValue: string;
@@ -43,6 +45,29 @@ export function InteractiveShell(props: InteractiveShellProps) {
       </Box>
       <Box marginTop={1}>
         <Text dimColor>Type /help for commands. Type /exit to close the session.</Text>
+      </Box>
+      <Box flexDirection="column" marginTop={1}>
+        {props.turns.map((turn) => {
+          const assistantText = turn.assistantFinal || turn.assistantStream;
+          return (
+            <Box key={turn.turnId} flexDirection="column" marginBottom={1}>
+              {turn.userMessage !== "" ? (
+                <Text color="yellow">you: {turn.userMessage}</Text>
+              ) : null}
+              {assistantText !== "" ? (
+                <Text color="cyan">
+                  klaude: {assistantText}
+                  {turn.assistantFinal === "" ? " ..." : ""}
+                </Text>
+              ) : null}
+              {turn.failure ? (
+                <Text color="red">
+                  failure: {turn.failure.category}/{turn.failure.code} {turn.failure.message}
+                </Text>
+              ) : null}
+            </Box>
+          );
+        })}
       </Box>
       <Box flexDirection="column" marginTop={1}>
         <Static items={props.lines}>

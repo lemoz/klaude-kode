@@ -82,7 +82,6 @@ async function runPromptMode(config: ShellConfig): Promise<void> {
 async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   const config = { ...initialConfig };
   const model = new ShellPresentationModel(config.rawEvents);
-  const streamedTurns = new Set<string>();
   let profileStatuses: ProfileStatus[] = [];
   let session: EngineSession | null = null;
   let busy = true;
@@ -126,6 +125,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   const renderShell = () =>
     React.createElement(InteractiveShell, {
       header: renderHeader(),
+      turns: model.transcript(),
       lines,
       promptLabel: ui.currentPrompt(),
       inputValue,
@@ -163,7 +163,6 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
         event,
         previousState,
         model.currentState(),
-        streamedTurns,
       );
       if (eventLines.length > 0) {
         lines = [...lines, ...eventLines];
@@ -627,36 +626,22 @@ function renderInteractiveEvent(
   event: SessionEvent,
   _previousState: SessionStateSnapshot | null,
   _currentState: SessionStateSnapshot | null,
-  streamedTurns: Set<string>,
 ): string[] {
   if (rawEvents) {
     return [JSON.stringify(event)];
   }
 
   const lines: string[] = [];
-
-  if (event.kind === "assistant_delta") {
-    if (event.payload.turn_id !== "") {
-      streamedTurns.add(event.payload.turn_id);
-    }
-    const rendered = renderEvent(event);
-    if (rendered !== "") {
-      lines.push(rendered);
-    }
+  if (
+    event.kind === "user_message_accepted" ||
+    event.kind === "assistant_delta" ||
+    event.kind === "assistant_message"
+  ) {
     return lines;
   }
-
-  if (
-    event.kind === "assistant_message" &&
-    event.payload.turn_id !== "" &&
-    streamedTurns.has(event.payload.turn_id)
-  ) {
-    streamedTurns.delete(event.payload.turn_id);
-  } else {
-    const rendered = renderEvent(event);
-    if (rendered !== "") {
-      lines.push(rendered);
-    }
+  const rendered = renderEvent(event);
+  if (rendered !== "") {
+    lines.push(rendered);
   }
 
   return lines;
