@@ -184,6 +184,16 @@ export interface EvalRunSummary {
   failure_codes: Record<string, number>;
 }
 
+export interface FrontierEntry {
+  run_id: string;
+  kind: string;
+  status: string;
+  score: number;
+  created_at: string;
+  benchmark: string;
+  failure_code: string;
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -481,6 +491,23 @@ export async function showRun(
     `-state-root=${config.stateRoot}`,
   ]);
   return JSON.parse(stdout) as EvalRun;
+}
+
+export async function listFrontier(
+  config: Pick<ShellConfig, "stateRoot" | "cwd">,
+  limit?: number,
+): Promise<FrontierEntry[]> {
+  const args = [
+    "-format=json",
+    "-list-frontier",
+    `-cwd=${config.cwd}`,
+    `-state-root=${config.stateRoot}`,
+  ];
+  if (limit !== undefined) {
+    args.push(`-frontier-limit=${limit}`);
+  }
+  const stdout = await runEngineAdminCommand(args);
+  return JSON.parse(stdout) as FrontierEntry[];
 }
 
 export async function logoutProfile(

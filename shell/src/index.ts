@@ -28,9 +28,11 @@ import {
   type PermissionEventPayload,
   type ProfileStatus,
   exportReplayPack,
+  listFrontier,
   type SessionEvent,
   type SessionStateSnapshot,
   type ShellConfig,
+  type FrontierEntry,
 } from "./engineClient.js";
 
 async function main(): Promise<void> {
@@ -203,6 +205,12 @@ async function runInteractiveLoop(
         if (slashCommand?.kind === "show_run") {
           const run = await showRun(config, slashCommand.runID);
           renderEvalRun(ui, run);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "list_frontier") {
+          const entries = await listFrontier(config, slashCommand.limit);
+          renderFrontier(ui, entries);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -530,6 +538,7 @@ function parseSlashCommand(
   | { kind: "status" }
   | { kind: "summarize_runs" }
   | { kind: "show_run"; runID: string }
+  | { kind: "list_frontier"; limit?: number }
   | { kind: "validate_candidate" }
   | { kind: "run_benchmark"; benchmarkPath: string }
   | { kind: "run_replay"; replayPath: string }
@@ -560,6 +569,20 @@ function parseSlashCommand(
       throw new Error("usage: /show-run <id>");
     }
     return { kind: "show_run", runID };
+  }
+  if (trimmed === "/list-frontier") {
+    return { kind: "list_frontier" };
+  }
+  if (trimmed.startsWith("/list-frontier ")) {
+    const rawLimit = trimmed.slice("/list-frontier ".length).trim();
+    if (rawLimit === "") {
+      throw new Error("usage: /list-frontier [limit]");
+    }
+    const limit = Number.parseInt(rawLimit, 10);
+    if (!Number.isFinite(limit) || limit <= 0) {
+      throw new Error("usage: /list-frontier [limit]");
+    }
+    return { kind: "list_frontier", limit };
   }
   if (trimmed === "/validate-candidate") {
     return { kind: "validate_candidate" };
@@ -859,6 +882,25 @@ function renderEvalRun(
   }
 }
 
+function renderFrontier(
+  ui: ReturnType<typeof createRenderer>,
+  entries: FrontierEntry[],
+): void {
+  ui.writeLine("frontier:");
+  ui.writeLine(`- entries: ${entries.length}`);
+  for (const entry of entries) {
+    ui.writeLine(
+      `  - ${entry.run_id} kind=${entry.kind} status=${entry.status} score=${entry.score.toFixed(2)}`,
+    );
+    if (entry.benchmark !== "") {
+      ui.writeLine(`    benchmark: ${entry.benchmark}`);
+    }
+    if (entry.failure_code !== "") {
+      ui.writeLine(`    failure_code: ${entry.failure_code}`);
+    }
+  }
+}
+
 function formatCapabilities(capabilities: ProfileStatus["capabilities"]): string {
   const enabled: string[] = [];
   if (capabilities.streaming) {
@@ -911,6 +953,7 @@ function printHelp(): void {
     "  /status",
     "  /summarize-runs",
     "  /show-run <id>",
+    "  /list-frontier [limit]",
     "  /validate-candidate",
     "  /run-benchmark <path>",
     "  /run-replay <path>",
