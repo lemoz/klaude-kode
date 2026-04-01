@@ -32,6 +32,7 @@ type config struct {
 	ExportReplayPack  bool
 	ValidateCandidate bool
 	RunReplayEval     bool
+	RunBenchmarkEval  bool
 	SummarizeRuns     bool
 	ShowRun           bool
 	Prompt            string
@@ -42,6 +43,7 @@ type config struct {
 	Model             string
 	StateRoot         string
 	ReplayPath        string
+	BenchmarkPath     string
 	RunID             string
 }
 
@@ -144,6 +146,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return renderReplayEval(cfg, stdout)
 	}
+	if cfg.RunBenchmarkEval {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-run-benchmark-eval does not support -format=events")
+		}
+		return renderBenchmarkEval(cfg, stdout)
+	}
 	if cfg.ResumeSessionID != "" {
 		return renderPersistedSession(ctx, runtime, cfg, stdout)
 	}
@@ -169,6 +177,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
 	showRunValue := fs.Bool("show-run", false, "show a persisted replay evaluation run and exit")
 	runReplayEvalValue := fs.Bool("run-replay-eval", false, "run a replay evaluation for the current candidate root and exit")
+	runBenchmarkEvalValue := fs.Bool("run-benchmark-eval", false, "run a benchmark evaluation for the current candidate root and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
 	sessionIDValue := fs.String("session-id", "cc-bootstrap", "session identifier")
 	resumeSessionValue := fs.String("resume-session", "", "load and render a persisted session")
@@ -177,6 +186,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	modelValue := fs.String("model", "", "active model id")
 	stateRootValue := fs.String("state-root", engine.DefaultStateRoot(), "engine state root")
 	replayPathValue := fs.String("replay-path", "", "path to a replay pack file for harness evaluation")
+	benchmarkPathValue := fs.String("benchmark-path", "", "path to a benchmark pack file for harness evaluation")
 	runIDValue := fs.String("run-id", "", "run identifier for -show-run")
 
 	if err := fs.Parse(args); err != nil {
@@ -200,6 +210,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		SummarizeRuns:     *summarizeRunsValue,
 		ShowRun:           *showRunValue,
 		RunReplayEval:     *runReplayEvalValue,
+		RunBenchmarkEval:  *runBenchmarkEvalValue,
 		Prompt:            strings.TrimSpace(*promptValue),
 		SessionID:         strings.TrimSpace(*sessionIDValue),
 		ResumeSessionID:   strings.TrimSpace(*resumeSessionValue),
@@ -208,6 +219,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		Model:             strings.TrimSpace(*modelValue),
 		StateRoot:         strings.TrimSpace(*stateRootValue),
 		ReplayPath:        strings.TrimSpace(*replayPathValue),
+		BenchmarkPath:     strings.TrimSpace(*benchmarkPathValue),
 		RunID:             strings.TrimSpace(*runIDValue),
 	}, nil
 }
@@ -492,6 +504,31 @@ func renderReplayEval(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderBenchmarkEval(cfg config, stdout io.Writer) error {
+	if cfg.BenchmarkPath == "" {
+		return fmt.Errorf("a benchmark path is required for -run-benchmark-eval")
+	}
+
+	run, err := harness.RunBenchmarkEval(cfg.CWD, cfg.BenchmarkPath)
+	if err != nil {
+		return err
+	}
+	if _, err := harness.PersistEvalRun(harness.DefaultArtifactRoot(run.Candidate.Root), run); err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(run)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderBenchmarkEvalText(stdout, run)
+	}
+}
+
 func renderRunSummary(cfg config, stdout io.Writer) error {
 	summary, err := harness.SummarizeIndexedEvalRuns(harness.DefaultArtifactRoot(cfg.CWD))
 	if err != nil {
@@ -710,6 +747,28 @@ func renderShowRunText(stdout io.Writer, run harness.EvalRun) error {
 		fmt.Sprintf("replay_path: %s", run.ReplayPath),
 		fmt.Sprintf("status: %s", run.Status),
 		fmt.Sprintf("score: %.2f", run.Score),
+	}
+	if run.Failure != nil {
+		lines = append(lines, fmt.Sprintf("failure_code: %s", run.Failure.Code))
+		lines = append(lines, fmt.Sprintf("failure_message: %s", run.Failure.Message))
+		lines = append(lines, fmt.Sprintf("retryable: %t", run.Failure.Retryable))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderBenchmarkEvalText(stdout io.Writer, run harness.EvalRun) error {
+	lines := []string{
+		"cc benchmark eval",
+		fmt.Sprintf("run: %s", run.ID),
+		fmt.Sprintf("candidate_root: %s", run.Candidate.Root),
+		fmt.Sprintf("status: %s", run.Status),
+		fmt.Sprintf("score: %.2f", run.Score),
+	}
+	if run.Benchmark != nil {
+		lines = append(lines, fmt.Sprintf("benchmark: %s", run.Benchmark.Name))
+		lines = append(lines, fmt.Sprintf("benchmark_path: %s", run.Benchmark.Path))
+		lines = append(lines, fmt.Sprintf("cases: %d", run.Benchmark.CaseCount))
 	}
 	if run.Failure != nil {
 		lines = append(lines, fmt.Sprintf("failure_code: %s", run.Failure.Code))
