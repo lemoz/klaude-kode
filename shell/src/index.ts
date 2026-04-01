@@ -755,8 +755,19 @@ function buildInteractiveHeader(
     profileId,
     provider: activeProfile?.profile.provider ?? "unknown",
     authState: activeProfile?.auth.state ?? "unknown",
+    authDetail: formatHeaderAuthDetail(activeProfile),
     model,
+    defaultModel: activeProfile?.profile.default_model ?? "unknown",
   };
+}
+
+function formatHeaderAuthDetail(profile: ProfileStatus | undefined): string {
+  if (!profile) {
+    return "expires=unknown refresh=unknown";
+  }
+  const expiresAt = profile.auth.expires_at.trim() === "" ? "n/a" : profile.auth.expires_at;
+  const refresh = profile.auth.can_refresh ? "yes" : "no";
+  return `expires=${expiresAt} refresh=${refresh}`;
 }
 
 function buildInteractiveFooter(
