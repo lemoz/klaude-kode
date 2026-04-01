@@ -749,10 +749,14 @@ export function defaultStateRoot(): string {
   return path.join(home, ".claude-next");
 }
 
+function defaultSessionID(): string {
+  return `shell-${process.pid}-${Date.now().toString(36)}`;
+}
+
 export function defaultShellConfig(): ShellConfig {
   return {
     prompt: "",
-    sessionId: "shell-bootstrap",
+    sessionId: defaultSessionID(),
     resumeSessionId: "",
     cwd: repoRoot,
     profileId: "",
