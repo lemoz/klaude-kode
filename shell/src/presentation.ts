@@ -132,15 +132,18 @@ export class ShellPresentationModel {
   }
 
   currentPrompt(): string {
-    const pending = this.state.pendingPermissions[0];
-    if (pending) {
-      return `${pending.prompt} [y/N] `;
+    if (this.state.pendingPermissions.length > 0) {
+      return "decision> ";
     }
     return "klaude> ";
   }
 
   takePendingPermission(): PermissionEventPayload | undefined {
     return this.state.pendingPermissions.shift();
+  }
+
+  pendingPermission(): PermissionEventPayload | null {
+    return this.state.pendingPermissions[0] ?? null;
   }
 
   private signalDecision(): void {

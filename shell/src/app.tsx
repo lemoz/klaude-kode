@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Box, Static, Text, useApp } from "ink";
 import type { TranscriptTurn } from "./presentation.js";
+import type { PermissionEventPayload } from "./engineClient.js";
 
 export interface InteractiveShellHeader {
   sessionId: string;
@@ -15,6 +16,7 @@ export interface InteractiveShellProps {
   header: InteractiveShellHeader;
   turns: TranscriptTurn[];
   lines: string[];
+  pendingPermission: PermissionEventPayload | null;
   promptLabel: string;
   inputValue: string;
   busy: boolean;
@@ -79,6 +81,25 @@ export function InteractiveShell(props: InteractiveShellProps) {
           );
         })}
       </Box>
+      {props.pendingPermission ? (
+        <Box
+          borderStyle="round"
+          borderColor="yellow"
+          paddingX={1}
+          flexDirection="column"
+          marginTop={1}
+        >
+          <Text color="yellowBright">Pending Permission</Text>
+          <Text>{props.pendingPermission.prompt}</Text>
+          <Text dimColor>
+            scope={props.pendingPermission.scope} policy={props.pendingPermission.policy_source}
+          </Text>
+          <Text dimColor>
+            request={props.pendingPermission.request_id} tool_call={props.pendingPermission.tool_call_id}
+          </Text>
+          <Text dimColor>approve with y/yes, deny with n/no</Text>
+        </Box>
+      ) : null}
       <Box flexDirection="column" marginTop={1}>
         <Static items={props.lines}>
           {(line, index) => <Text key={`${index}:${line}`}>{line}</Text>}

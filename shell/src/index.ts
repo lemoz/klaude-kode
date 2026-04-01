@@ -59,6 +59,7 @@ interface ShellUIController extends LineWriter {
   currentState(): SessionStateSnapshot | null;
   waitForDecision(afterVersion: number): Promise<void>;
   currentPrompt(): string;
+  pendingPermission(): PermissionEventPayload | null;
   takePendingPermission(): PermissionEventPayload | undefined;
   setProfileStatuses(profiles: ProfileStatus[]): void;
 }
@@ -106,6 +107,9 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
     currentPrompt(): string {
       return model.currentPrompt();
     },
+    pendingPermission(): PermissionEventPayload | null {
+      return model.pendingPermission();
+    },
     takePendingPermission(): PermissionEventPayload | undefined {
       return model.takePendingPermission();
     },
@@ -127,6 +131,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       header: renderHeader(),
       turns: model.transcript(),
       lines,
+      pendingPermission: ui.pendingPermission(),
       promptLabel: ui.currentPrompt(),
       inputValue,
       busy,
@@ -607,6 +612,9 @@ function createRenderer(rawEvents: boolean) {
     currentPrompt(): string {
       return model.currentPrompt();
     },
+    pendingPermission(): PermissionEventPayload | null {
+      return model.pendingPermission();
+    },
     takePendingPermission(): PermissionEventPayload | undefined {
       return model.takePendingPermission();
     },
@@ -638,7 +646,8 @@ function renderInteractiveEvent(
     event.kind === "assistant_message" ||
     event.kind === "tool_call_requested" ||
     event.kind === "tool_call_progress" ||
-    event.kind === "tool_call_completed"
+    event.kind === "tool_call_completed" ||
+    event.kind === "permission_requested"
   ) {
     return lines;
   }
