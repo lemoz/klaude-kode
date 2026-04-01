@@ -81,6 +81,16 @@ type EvalRunDiff struct {
 	CaseDiffs        []BenchmarkCaseDiff `json:"case_diffs"`
 }
 
+type FrontierEntry struct {
+	RunID       string    `json:"run_id"`
+	Kind        string    `json:"kind"`
+	Status      string    `json:"status"`
+	Score       float64   `json:"score"`
+	CreatedAt   time.Time `json:"created_at"`
+	Benchmark   string    `json:"benchmark"`
+	FailureCode string    `json:"failure_code"`
+}
+
 type EvalRunSummary struct {
 	ArtifactRoot string         `json:"artifact_root"`
 	TotalRuns    int            `json:"total_runs"`
