@@ -19,3 +19,16 @@ func LoadReplayPack(path string) (contracts.ReplayPack, error) {
 	}
 	return pack, nil
 }
+
+func LoadBenchmarkPack(path string) (BenchmarkPack, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return BenchmarkPack{}, err
+	}
+
+	var pack BenchmarkPack
+	if err := json.Unmarshal(data, &pack); err != nil {
+		return BenchmarkPack{}, err
+	}
+	return pack, nil
+}
