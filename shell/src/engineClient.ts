@@ -194,6 +194,32 @@ export interface FrontierEntry {
   failure_code: string;
 }
 
+export interface BenchmarkCaseDiff {
+  id: string;
+  left_status: string;
+  right_status: string;
+  left_score: number;
+  right_score: number;
+  score_delta: number;
+  left_failure_code: string;
+  right_failure_code: string;
+}
+
+export interface EvalRunDiff {
+  left_run_id: string;
+  right_run_id: string;
+  left_kind: string;
+  right_kind: string;
+  left_status: string;
+  right_status: string;
+  left_score: number;
+  right_score: number;
+  score_delta: number;
+  left_failure_code: string;
+  right_failure_code: string;
+  case_diffs: BenchmarkCaseDiff[];
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -508,6 +534,22 @@ export async function listFrontier(
   }
   const stdout = await runEngineAdminCommand(args);
   return JSON.parse(stdout) as FrontierEntry[];
+}
+
+export async function diffRuns(
+  config: Pick<ShellConfig, "stateRoot" | "cwd">,
+  leftRunID: string,
+  rightRunID: string,
+): Promise<EvalRunDiff> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    "-diff-runs",
+    `-cwd=${config.cwd}`,
+    `-left-run-id=${leftRunID}`,
+    `-right-run-id=${rightRunID}`,
+    `-state-root=${config.stateRoot}`,
+  ]);
+  return JSON.parse(stdout) as EvalRunDiff;
 }
 
 export async function logoutProfile(

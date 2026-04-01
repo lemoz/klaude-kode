@@ -6,6 +6,7 @@ import process from "node:process";
 import {
   makeApprovePermissionCommand,
   defaultShellConfig,
+  diffRuns,
   makeCloseSessionCommand,
   makeDenyPermissionCommand,
   loginAnthropic,
@@ -24,6 +25,7 @@ import {
   validateCandidate,
   type CandidateValidationResult,
   type EvalRun,
+  type EvalRunDiff,
   type EvalRunSummary,
   type PermissionEventPayload,
   type ProfileStatus,
@@ -211,6 +213,12 @@ async function runInteractiveLoop(
         if (slashCommand?.kind === "list_frontier") {
           const entries = await listFrontier(config, slashCommand.limit);
           renderFrontier(ui, entries);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "diff_runs") {
+          const diff = await diffRuns(config, slashCommand.leftRunID, slashCommand.rightRunID);
+          renderRunDiff(ui, diff);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -539,6 +547,7 @@ function parseSlashCommand(
   | { kind: "summarize_runs" }
   | { kind: "show_run"; runID: string }
   | { kind: "list_frontier"; limit?: number }
+  | { kind: "diff_runs"; leftRunID: string; rightRunID: string }
   | { kind: "validate_candidate" }
   | { kind: "run_benchmark"; benchmarkPath: string }
   | { kind: "run_replay"; replayPath: string }
@@ -583,6 +592,13 @@ function parseSlashCommand(
       throw new Error("usage: /list-frontier [limit]");
     }
     return { kind: "list_frontier", limit };
+  }
+  if (trimmed.startsWith("/diff-runs ")) {
+    const parts = trimmed.slice("/diff-runs ".length).trim().split(/\s+/);
+    if (parts.length !== 2 || parts[0] === "" || parts[1] === "") {
+      throw new Error("usage: /diff-runs <left-run-id> <right-run-id>");
+    }
+    return { kind: "diff_runs", leftRunID: parts[0], rightRunID: parts[1] };
   }
   if (trimmed === "/validate-candidate") {
     return { kind: "validate_candidate" };
@@ -901,6 +917,27 @@ function renderFrontier(
   }
 }
 
+function renderRunDiff(
+  ui: ReturnType<typeof createRenderer>,
+  diff: EvalRunDiff,
+): void {
+  ui.writeLine("diff:");
+  ui.writeLine(`- left_run: ${diff.left_run_id}`);
+  ui.writeLine(`  right_run: ${diff.right_run_id}`);
+  ui.writeLine(`  left_status: ${diff.left_status}`);
+  ui.writeLine(`  right_status: ${diff.right_status}`);
+  ui.writeLine(`  left_score: ${diff.left_score.toFixed(2)}`);
+  ui.writeLine(`  right_score: ${diff.right_score.toFixed(2)}`);
+  ui.writeLine(`  score_delta: ${diff.score_delta.toFixed(2)}`);
+  if (diff.left_failure_code !== "" || diff.right_failure_code !== "") {
+    ui.writeLine(`  left_failure_code: ${diff.left_failure_code || "none"}`);
+    ui.writeLine(`  right_failure_code: ${diff.right_failure_code || "none"}`);
+  }
+  if (diff.case_diffs.length > 0) {
+    ui.writeLine(`  case_diffs: ${diff.case_diffs.length}`);
+  }
+}
+
 function formatCapabilities(capabilities: ProfileStatus["capabilities"]): string {
   const enabled: string[] = [];
   if (capabilities.streaming) {
@@ -954,6 +991,7 @@ function printHelp(): void {
     "  /summarize-runs",
     "  /show-run <id>",
     "  /list-frontier [limit]",
+    "  /diff-runs <left-run-id> <right-run-id>",
     "  /validate-candidate",
     "  /run-benchmark <path>",
     "  /run-replay <path>",
