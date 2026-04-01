@@ -465,6 +465,33 @@ func TestRunBenchmarkEvalJSON(t *testing.T) {
 	}
 }
 
+func TestRunBenchmarkEvalWithRepositoryFixtureJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	benchmarkPath := filepath.Join("/Users/cdossman/klaude-kode", "benchmarks", "packs", "mixed-basic.json")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-format=json",
+		"-run-benchmark-eval",
+		"-cwd=" + candidateRoot,
+		"-benchmark-path=" + benchmarkPath,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var got harness.EvalRun
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse benchmark eval output: %v", err)
+	}
+	if got.Benchmark == nil || got.Benchmark.Name != "mixed-basic" {
+		t.Fatalf("expected mixed-basic fixture benchmark, got %#v", got)
+	}
+	if got.Score != 0.5 {
+		t.Fatalf("expected fixture benchmark score 0.5, got %#v", got)
+	}
+}
+
 func TestRunDiffRunsJSON(t *testing.T) {
 	candidateRoot := createValidCandidateRoot(t)
 	artifactRoot := harness.DefaultArtifactRoot(candidateRoot)
