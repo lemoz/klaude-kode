@@ -42,6 +42,7 @@ import {
   InteractiveShell,
   type InteractiveShellFooter,
   type InteractiveShellHeader,
+  type InteractivePromptState,
 } from "./app.js";
 import { ShellPresentationModel } from "./presentation.js";
 
@@ -150,6 +151,8 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
     buildInteractiveHeader(config, model.currentState(), profileStatuses);
   const renderFooter = (): InteractiveShellFooter =>
     buildInteractiveFooter(model.currentState(), ui.pendingPermission(), closed, activeSurface);
+  const renderPromptState = (): InteractivePromptState =>
+    buildInteractivePromptState(ui.pendingPermission(), busy, closed);
   const renderShell = () =>
     React.createElement(InteractiveShell, {
       header: renderHeader(),
@@ -157,9 +160,8 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       turns: model.transcript(),
       lines,
       pendingPermission: ui.pendingPermission(),
-      promptLabel: ui.currentPrompt(),
+      promptState: renderPromptState(),
       inputValue,
-      busy,
       closed,
     });
   const ink = render(renderShell());
@@ -250,6 +252,10 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   }
 
   async function submitBufferedInput(): Promise<void> {
+    const promptState = renderPromptState();
+    if (!promptState.editable) {
+      return;
+    }
     const line = inputValue.trimEnd();
     inputValue = "";
     rerender();
@@ -287,7 +293,8 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
         await closeShell("shell_exit");
         return;
       }
-      if (busy) {
+      const promptState = renderPromptState();
+      if (!promptState.editable) {
         continue;
       }
       if (character === "\r" || character === "\n") {
@@ -737,6 +744,43 @@ function buildInteractiveFooter(
     modeCue: surface.includes("eval") || surface === "runs" || surface === "frontier" || surface === "diff"
       ? "artifact_view"
       : "conversation_view",
+  };
+}
+
+function buildInteractivePromptState(
+  pendingPermission: PermissionEventPayload | null,
+  busy: boolean,
+  closed: boolean,
+): InteractivePromptState {
+  if (closed) {
+    return {
+      mode: "closed",
+      label: "closed> ",
+      hint: "session closed",
+      editable: false,
+    };
+  }
+  if (busy) {
+    return {
+      mode: "read_only",
+      label: "wait> ",
+      hint: "engine busy",
+      editable: false,
+    };
+  }
+  if (pendingPermission) {
+    return {
+      mode: "decision",
+      label: "decision> ",
+      hint: "y approves, n denies",
+      editable: true,
+    };
+  }
+  return {
+    mode: "ready",
+    label: "klaude> ",
+    hint: "enter a prompt or /help",
+    editable: true,
   };
 }
 

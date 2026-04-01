@@ -20,15 +20,21 @@ export interface InteractiveShellFooter {
   modeCue: string;
 }
 
+export interface InteractivePromptState {
+  mode: "ready" | "decision" | "read_only" | "closed";
+  label: string;
+  hint: string;
+  editable: boolean;
+}
+
 export interface InteractiveShellProps {
   header: InteractiveShellHeader;
   footer: InteractiveShellFooter;
   turns: TranscriptTurn[];
   lines: string[];
   pendingPermission: PermissionEventPayload | null;
-  promptLabel: string;
+  promptState: InteractivePromptState;
   inputValue: string;
-  busy: boolean;
   closed: boolean;
 }
 
@@ -120,9 +126,11 @@ export function InteractiveShell(props: InteractiveShellProps) {
         </Text>
       </Box>
       <Box marginTop={1}>
-        <Text color="green">{props.promptLabel}</Text>
+        <Text color={props.promptState.mode === "decision" ? "yellow" : "green"}>
+          {props.promptState.label}
+        </Text>
         <Text>{props.inputValue}</Text>
-        {props.busy ? <Text dimColor> ...</Text> : null}
+        {props.promptState.hint !== "" ? <Text dimColor> {props.promptState.hint}</Text> : null}
       </Box>
     </Box>
   );
