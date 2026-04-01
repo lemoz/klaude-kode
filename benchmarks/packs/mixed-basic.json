@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name": "mixed-basic",
+  "description": "One passing replay and one failing replay for harness validation.",
+  "cases": [
+    {
+      "id": "pass_basic",
+      "replay_path": "../replays/pass-basic.json",
+      "weight": 1
+    },
+    {
+      "id": "fail_basic",
+      "replay_path": "../replays/fail-basic.json",
+      "weight": 1
+    }
+  ]
+}
