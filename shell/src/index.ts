@@ -114,6 +114,9 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   let artifactView: ArtifactView | null = null;
 
   const appendLine = (line: string) => {
+    if (!shouldKeepOperationLine(line)) {
+      return;
+    }
     lines = [...lines, line];
   };
 
@@ -208,8 +211,9 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
         previousState,
         model.currentState(),
       );
-      if (eventLines.length > 0) {
-        lines = [...lines, ...eventLines];
+      const visibleEventLines = eventLines.filter(shouldKeepOperationLine);
+      if (visibleEventLines.length > 0) {
+        lines = [...lines, ...visibleEventLines];
       }
       if (event.kind === "session_closed") {
         closed = true;
@@ -915,6 +919,17 @@ function renderEvent(event: SessionEvent): string {
     default:
       return "";
   }
+}
+
+function shouldKeepOperationLine(line: string): boolean {
+  const normalized = line.trim();
+  if (normalized === "") {
+    return false;
+  }
+  if (normalized === "terminal_outcome: none") {
+    return false;
+  }
+  return true;
 }
 
 function renderTerminalOutcome(state: SessionStateSnapshot | null): string {
