@@ -12,8 +12,17 @@ export interface InteractiveShellHeader {
   model: string;
 }
 
+export interface InteractiveShellFooter {
+  surface: string;
+  sessionStatus: string;
+  terminalOutcome: string;
+  pendingPermission: string;
+  modeCue: string;
+}
+
 export interface InteractiveShellProps {
   header: InteractiveShellHeader;
+  footer: InteractiveShellFooter;
   turns: TranscriptTurn[];
   lines: string[];
   pendingPermission: PermissionEventPayload | null;
@@ -104,6 +113,11 @@ export function InteractiveShell(props: InteractiveShellProps) {
         <Static items={props.lines}>
           {(line, index) => <Text key={`${index}:${line}`}>{line}</Text>}
         </Static>
+      </Box>
+      <Box borderStyle="round" borderColor="gray" paddingX={1} marginTop={1}>
+        <Text dimColor>
+          surface={props.footer.surface} status={props.footer.sessionStatus} outcome={props.footer.terminalOutcome} pending={props.footer.pendingPermission} cue={props.footer.modeCue}
+        </Text>
       </Box>
       <Box marginTop={1}>
         <Text color="green">{props.promptLabel}</Text>

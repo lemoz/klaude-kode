@@ -38,7 +38,11 @@ import {
   type ShellConfig,
   type FrontierEntry,
 } from "./engineClient.js";
-import { InteractiveShell, type InteractiveShellHeader } from "./app.js";
+import {
+  InteractiveShell,
+  type InteractiveShellFooter,
+  type InteractiveShellHeader,
+} from "./app.js";
 import { ShellPresentationModel } from "./presentation.js";
 
 async function main(): Promise<void> {
@@ -54,6 +58,18 @@ interface LineWriter {
   writeLine(line: string): void;
 }
 
+type ShellSurface =
+  | "conversation"
+  | "profiles"
+  | "status"
+  | "models"
+  | "validation"
+  | "runs"
+  | "replay_eval"
+  | "benchmark_eval"
+  | "frontier"
+  | "diff";
+
 interface ShellUIController extends LineWriter {
   decisionVersion(): number;
   currentState(): SessionStateSnapshot | null;
@@ -62,6 +78,7 @@ interface ShellUIController extends LineWriter {
   pendingPermission(): PermissionEventPayload | null;
   takePendingPermission(): PermissionEventPayload | undefined;
   setProfileStatuses(profiles: ProfileStatus[]): void;
+  setActiveSurface(surface: ShellSurface): void;
 }
 
 async function runPromptMode(config: ShellConfig): Promise<void> {
@@ -89,6 +106,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   let closed = false;
   let inputValue = "";
   let lines: string[] = [];
+  let activeSurface: ShellSurface = "conversation";
 
   const appendLine = (line: string) => {
     lines = [...lines, line];
@@ -117,6 +135,10 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       profileStatuses = profiles;
       rerender();
     },
+    setActiveSurface(surface: ShellSurface): void {
+      activeSurface = surface;
+      rerender();
+    },
     writeLine(line: string): void {
       appendLine(line);
       rerender();
@@ -126,9 +148,12 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   let rerender = () => undefined;
   const renderHeader = (): InteractiveShellHeader =>
     buildInteractiveHeader(config, model.currentState(), profileStatuses);
+  const renderFooter = (): InteractiveShellFooter =>
+    buildInteractiveFooter(model.currentState(), ui.pendingPermission(), closed, activeSurface);
   const renderShell = () =>
     React.createElement(InteractiveShell, {
       header: renderHeader(),
+      footer: renderFooter(),
       turns: model.transcript(),
       lines,
       pendingPermission: ui.pendingPermission(),
@@ -299,6 +324,7 @@ async function handleShellInputLine(
   }
   const slashCommand = parseSlashCommand(line);
   if (slashCommand?.kind === "setting") {
+    ui.setActiveSurface("conversation");
     const decisionVersion = ui.decisionVersion();
     await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
     await ui.waitForDecision(decisionVersion);
@@ -313,53 +339,63 @@ async function handleShellInputLine(
     return;
   }
   if (slashCommand?.kind === "profiles") {
+    ui.setActiveSurface("profiles");
     const profiles = await listProfiles(config);
     ui.setProfileStatuses(profiles);
     renderProfiles(ui, profiles, config.profileId);
     return;
   }
   if (slashCommand?.kind === "status") {
+    ui.setActiveSurface("status");
     renderStatus(ui, config, ui.currentState());
     return;
   }
   if (slashCommand?.kind === "summarize_runs") {
+    ui.setActiveSurface("runs");
     const summary = await summarizeRuns(config);
     renderRunSummary(ui, summary);
     return;
   }
   if (slashCommand?.kind === "show_run") {
+    ui.setActiveSurface("runs");
     const run = await showRun(config, slashCommand.runID);
     renderEvalRun(ui, run);
     return;
   }
   if (slashCommand?.kind === "list_frontier") {
+    ui.setActiveSurface("frontier");
     const entries = await listFrontier(config, slashCommand.limit);
     renderFrontier(ui, entries);
     return;
   }
   if (slashCommand?.kind === "diff_runs") {
+    ui.setActiveSurface("diff");
     const diff = await diffRuns(config, slashCommand.leftRunID, slashCommand.rightRunID);
     renderRunDiff(ui, diff);
     return;
   }
   if (slashCommand?.kind === "validate_candidate") {
+    ui.setActiveSurface("validation");
     const validation = await validateCandidate(config);
     renderCandidateValidation(ui, validation);
     return;
   }
   if (slashCommand?.kind === "run_benchmark") {
+    ui.setActiveSurface("benchmark_eval");
     const benchmarkPath = path.resolve(config.cwd, slashCommand.benchmarkPath);
     const evalRun = await runBenchmarkEval(config, benchmarkPath);
     renderEvalRun(ui, evalRun);
     return;
   }
   if (slashCommand?.kind === "run_replay") {
+    ui.setActiveSurface("replay_eval");
     const replayPath = path.resolve(config.cwd, slashCommand.replayPath);
     const evalRun = await runReplayEval(config, replayPath);
     renderReplayEval(ui, evalRun);
     return;
   }
   if (slashCommand?.kind === "export_replay") {
+    ui.setActiveSurface("replay_eval");
     const targetPath = path.resolve(config.cwd, slashCommand.outputPath);
     const replayPack = await exportReplayPack(config);
     await mkdir(path.dirname(targetPath), { recursive: true });
@@ -368,6 +404,7 @@ async function handleShellInputLine(
     return;
   }
   if (slashCommand?.kind === "models") {
+    ui.setActiveSurface("models");
     const catalog = await listModels(
       config,
       slashCommand.profileId || config.profileId,
@@ -381,6 +418,7 @@ async function handleShellInputLine(
     return;
   }
   if (slashCommand?.kind === "logout") {
+    ui.setActiveSurface("profiles");
     const profiles = await logoutProfile(config, slashCommand.profileId);
     ui.setProfileStatuses(profiles);
     ui.writeLine(`logout: cleared stored auth for ${slashCommand.profileId}`);
@@ -388,6 +426,7 @@ async function handleShellInputLine(
     return;
   }
   if (slashCommand?.kind === "login_openrouter") {
+    ui.setActiveSurface("profiles");
     const profiles = await loginOpenRouter(config, {
       credential: slashCommand.credential,
       defaultModel: slashCommand.defaultModel,
@@ -404,6 +443,7 @@ async function handleShellInputLine(
     return;
   }
   if (slashCommand?.kind === "login_anthropic") {
+    ui.setActiveSurface("profiles");
     const profiles = await loginAnthropic(config, {
       credential: slashCommand.credential,
       defaultModel: slashCommand.defaultModel,
@@ -420,6 +460,7 @@ async function handleShellInputLine(
     return;
   }
   if (slashCommand?.kind === "login_anthropic_oauth") {
+    ui.setActiveSurface("profiles");
     ui.writeLine("login: opening browser for Anthropic OAuth");
     const profiles = await loginAnthropicOAuth(config, {
       defaultModel: slashCommand.defaultModel,
@@ -439,6 +480,7 @@ async function handleShellInputLine(
 
   const pendingPermission = ui.takePendingPermission();
   if (pendingPermission) {
+    ui.setActiveSurface("conversation");
     const decisionVersion = ui.decisionVersion();
     if (looksApproved(line)) {
       await session.sendCommand(
@@ -454,6 +496,7 @@ async function handleShellInputLine(
   }
 
   const decisionVersion = ui.decisionVersion();
+  ui.setActiveSurface("conversation");
   await session.sendCommand(makeUserInputCommand(line, { askForPermission: true }));
   await ui.waitForDecision(decisionVersion);
 }
@@ -677,6 +720,23 @@ function buildInteractiveHeader(
     provider: activeProfile?.profile.provider ?? "unknown",
     authState: activeProfile?.auth.state ?? "unknown",
     model,
+  };
+}
+
+function buildInteractiveFooter(
+  state: SessionStateSnapshot | null,
+  pendingPermission: PermissionEventPayload | null,
+  closed: boolean,
+  surface: ShellSurface,
+): InteractiveShellFooter {
+  return {
+    surface,
+    sessionStatus: closed ? "closed" : state?.status ?? "starting",
+    terminalOutcome: state?.terminal_outcome || "none",
+    pendingPermission: pendingPermission ? "awaiting_decision" : "none",
+    modeCue: surface.includes("eval") || surface === "runs" || surface === "frontier" || surface === "diff"
+      ? "artifact_view"
+      : "conversation_view",
   };
 }
 
