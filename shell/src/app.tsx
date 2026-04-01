@@ -66,6 +66,7 @@ export interface InteractiveShellProps {
 
 export function InteractiveShell(props: InteractiveShellProps) {
   const { exit } = useApp();
+  const visibleOperationLines = props.lines.filter((line) => line.trim() !== "");
 
   useEffect(() => {
     if (props.closed) {
@@ -185,10 +186,10 @@ export function InteractiveShell(props: InteractiveShellProps) {
           <Text dimColor>approve with y/yes, deny with n/no</Text>
         </Box>
       ) : null}
-      {props.lines.length > 0 ? (
+      {visibleOperationLines.length > 0 ? (
         <Box borderStyle="round" borderColor={SHELL_THEME.activity} paddingX={1} flexDirection="column" marginTop={1}>
           <Text color={SHELL_THEME.activity}>Operations</Text>
-          {props.lines.map((line, index) => (
+          {visibleOperationLines.map((line, index) => (
             <Text key={`${index}:${line}`} dimColor>
               {line}
             </Text>
