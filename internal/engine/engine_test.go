@@ -15,6 +15,8 @@ import (
 
 type nonStreamingAdapter struct{}
 
+type limitedCapabilityAdapter struct{}
+
 func (a *nonStreamingAdapter) Kind() contracts.ProviderKind {
 	return contracts.ProviderAnthropic
 }
@@ -49,6 +51,48 @@ func (a *nonStreamingAdapter) Capabilities(_ context.Context, _ contracts.AuthPr
 		Streaming:         false,
 		ToolCalling:       true,
 		StructuredOutputs: true,
+	}, nil
+}
+
+func (a *limitedCapabilityAdapter) Kind() contracts.ProviderKind {
+	return contracts.ProviderAnthropic
+}
+
+func (a *limitedCapabilityAdapter) ListModels(_ context.Context, _ contracts.AuthProfile) ([]string, error) {
+	return []string{"claude-sonnet-4-6"}, nil
+}
+
+func (a *limitedCapabilityAdapter) CountTokens(_ context.Context, _ contracts.AuthProfile, _ contracts.TokenCountRequest) (contracts.TokenCountResult, error) {
+	return contracts.TokenCountResult{InputTokens: 1}, nil
+}
+
+func (a *limitedCapabilityAdapter) StreamCompletion(_ context.Context, _ contracts.AuthProfile, _ contracts.CompletionRequest) (<-chan contracts.ProviderEvent, error) {
+	stream := make(chan contracts.ProviderEvent, 1)
+	close(stream)
+	return stream, nil
+}
+
+func (a *limitedCapabilityAdapter) Complete(_ context.Context, _ contracts.AuthProfile, _ contracts.CompletionRequest) (contracts.CompletionResult, error) {
+	return contracts.CompletionResult{
+		Message: contracts.CanonicalMessage{
+			Role:    "assistant",
+			Content: "limited capability reply",
+		},
+	}, nil
+}
+
+func (a *limitedCapabilityAdapter) ValidateProfile(_ context.Context, _ contracts.AuthProfile) (contracts.ProfileValidationResult, error) {
+	return contracts.ProfileValidationResult{Valid: true, Message: "profile is valid"}, nil
+}
+
+func (a *limitedCapabilityAdapter) Capabilities(_ context.Context, _ contracts.AuthProfile, _ string) (contracts.CapabilitySet, error) {
+	return contracts.CapabilitySet{
+		Streaming:          true,
+		ToolCalling:        false,
+		StructuredOutputs:  false,
+		DeferredToolSearch: false,
+		ImageInput:         false,
+		DocumentInput:      false,
 	}, nil
 }
 
@@ -545,6 +589,66 @@ func TestOpenRouterCustomModelRemainsUsable(t *testing.T) {
 	}
 	if events[5].Payload.Message == nil || !strings.Contains(events[5].Payload.Message.Content, "OpenRouter response from my/custom-model") {
 		t.Fatalf("expected custom openrouter model response, got %#v", events[5].Payload.Message)
+	}
+}
+
+func TestProviderTurnFailsWhenRequestedCapabilityIsUnsupported(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name     string
+		metadata map[string]string
+	}{
+		{name: "tool calling", metadata: map[string]string{"tool_choice": "auto"}},
+		{name: "structured outputs", metadata: map[string]string{"structured_output": "true"}},
+		{name: "deferred tool search", metadata: map[string]string{"deferred_tool_search": "true"}},
+		{name: "image input", metadata: map[string]string{"input_kind": "image"}},
+		{name: "document input", metadata: map[string]string{"input_kind": "document"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := NewInMemoryEngine()
+			runtime.providers = provider.NewRegistry(&limitedCapabilityAdapter{})
+
+			handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+				SessionID: "sess_capability_" + strings.ReplaceAll(tc.name, " ", "_"),
+				CWD:       "/tmp/project",
+				Mode:      contracts.SessionModeInteractive,
+				ProfileID: "anthropic-main",
+				Model:     "claude-sonnet-4-6",
+			})
+			if err != nil {
+				t.Fatalf("StartSession returned error: %v", err)
+			}
+
+			if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+				Kind: contracts.CommandKindUserInput,
+				Payload: contracts.SessionCommandPayload{
+					Text:     "hello capability gate",
+					Source:   contracts.MessageSourceInteractive,
+					Metadata: tc.metadata,
+				},
+			}); err != nil {
+				t.Fatalf("SendCommand returned error: %v", err)
+			}
+
+			events, err := runtime.ListEvents(ctx, handle.SessionID)
+			if err != nil {
+				t.Fatalf("ListEvents returned error: %v", err)
+			}
+			if events[4].Kind != contracts.EventKindFailure {
+				t.Fatalf("expected failure event at sequence 5, got %s", events[4].Kind)
+			}
+			if events[4].Payload.Failure == nil || events[4].Payload.Failure.Code != "capability_mismatch" {
+				t.Fatalf("expected capability_mismatch failure payload, got %#v", events[4].Payload.Failure)
+			}
+			if events[6].Kind != contracts.EventKindLifecycle || events[6].Payload.TerminalOutcome != contracts.TerminalOutcomeValidationFailure {
+				t.Fatalf("expected validation_failure turn completion, got %s (%s)", events[6].Kind, events[6].Payload.TerminalOutcome)
+			}
+			if events[7].Payload.State == nil || events[7].Payload.State.TerminalOutcome != contracts.TerminalOutcomeValidationFailure {
+				t.Fatalf("expected validation failure in state snapshot, got %#v", events[7].Payload.State)
+			}
+		})
 	}
 }
 

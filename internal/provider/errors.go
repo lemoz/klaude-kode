@@ -9,6 +9,7 @@ type ErrorCode string
 
 const (
 	ErrorCodeInvalidModel          ErrorCode = "invalid_model"
+	ErrorCodeCapabilityMismatch    ErrorCode = "capability_mismatch"
 	ErrorCodeAuthUnavailable       ErrorCode = "auth_unavailable"
 	ErrorCodeAuthFailed            ErrorCode = "auth_failed"
 	ErrorCodeProviderRequestFailed ErrorCode = "provider_request_failed"

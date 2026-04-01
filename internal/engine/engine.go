@@ -843,7 +843,7 @@ func scaffoldAssistantReply(model string, userText string) string {
 func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, commandID string, userText string, metadata map[string]string) (turnResult, error) {
 	call, isToolCall := toolruntime.ParseInlineToolCall(userText)
 	if !isToolCall {
-		return e.executeProviderTurnLocked(record, turnID, commandID, userText)
+		return e.executeProviderTurnLocked(record, turnID, commandID, userText, metadata)
 	}
 
 	call.ID = fmt.Sprintf("tool_%s_1", turnID)
@@ -916,7 +916,7 @@ func (e *InMemoryEngine) runTurnLocked(record *sessionRecord, turnID string, com
 	return e.executeToolCallLocked(record, turnID, commandID, call, descriptor)
 }
 
-func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID string, commandID string, userText string) (turnResult, error) {
+func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID string, commandID string, userText string, metadata map[string]string) (turnResult, error) {
 	if e.providers == nil {
 		return turnResult{
 			Outcome:          contracts.TerminalOutcomeSuccess,
@@ -996,6 +996,19 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 			},
 		},
 	}
+	if requestedToolChoice := parseRequestedToolChoice(metadata); requestedToolChoice != "" {
+		completionRequest.ToolChoice = requestedToolChoice
+	}
+	if err := validateCapabilityRequirements(profile, model, capabilities, completionRequest, metadata); err != nil {
+		category, code, outcome, retryable, assistantMessage := classifyProviderFailure(err)
+		if emitErr := e.emitFailureDetailedLocked(record, turnID, commandID, category, code, err, outcome, retryable); emitErr != nil {
+			return turnResult{}, emitErr
+		}
+		return turnResult{
+			Outcome:          outcome,
+			AssistantMessage: assistantMessage,
+		}, nil
+	}
 
 	assistantDeltas, completion, err := e.streamOrCompleteProviderTurn(record, turnID, commandID, profile, capabilities, completionRequest)
 	if shouldRetryOAuthCompletion(err, profile) {
@@ -1037,6 +1050,55 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 		AssistantDeltas:  assistantDeltas,
 		AssistantMessage: message,
 	}, nil
+}
+
+func validateCapabilityRequirements(profile contracts.AuthProfile, model string, capabilities contracts.CapabilitySet, req contracts.CompletionRequest, metadata map[string]string) error {
+	if req.ToolChoice == contracts.ToolChoiceAuto && !capabilities.ToolCalling {
+		return capabilityMismatch(profile, model, "tool calling")
+	}
+	if metadataEnabled(metadata, "structured_output") && !capabilities.StructuredOutputs {
+		return capabilityMismatch(profile, model, "structured outputs")
+	}
+	if metadataEnabled(metadata, "deferred_tool_search") && !capabilities.DeferredToolSearch {
+		return capabilityMismatch(profile, model, "deferred tool search")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(metadata["input_kind"])) {
+	case "image":
+		if !capabilities.ImageInput {
+			return capabilityMismatch(profile, model, "image input")
+		}
+	case "document":
+		if !capabilities.DocumentInput {
+			return capabilityMismatch(profile, model, "document input")
+		}
+	}
+
+	return nil
+}
+
+func capabilityMismatch(profile contracts.AuthProfile, model string, feature string) error {
+	return &provider.Error{
+		Code:      provider.ErrorCodeCapabilityMismatch,
+		Message:   fmt.Sprintf("provider %s model %s does not support %s", profile.Provider, model, feature),
+		Retryable: false,
+	}
+}
+
+func parseRequestedToolChoice(metadata map[string]string) contracts.ToolChoice {
+	switch strings.ToLower(strings.TrimSpace(metadata["tool_choice"])) {
+	case string(contracts.ToolChoiceAuto):
+		return contracts.ToolChoiceAuto
+	case string(contracts.ToolChoiceNone):
+		return contracts.ToolChoiceNone
+	default:
+		return ""
+	}
+}
+
+func metadataEnabled(metadata map[string]string, key string) bool {
+	value := strings.ToLower(strings.TrimSpace(metadata[key]))
+	return value == "1" || value == "true" || value == "yes"
 }
 
 func (e *InMemoryEngine) streamOrCompleteProviderTurn(record *sessionRecord, turnID string, commandID string, profile contracts.AuthProfile, capabilities contracts.CapabilitySet, req contracts.CompletionRequest) ([]string, contracts.CompletionResult, error) {
@@ -1476,6 +1538,8 @@ func classifyProviderFailure(err error) (contracts.FailureCategory, string, cont
 	switch providerErr.Code {
 	case provider.ErrorCodeInvalidModel:
 		return contracts.FailureCategoryProvider, string(provider.ErrorCodeInvalidModel), contracts.TerminalOutcomeValidationFailure, providerErr.Retryable, fmt.Sprintf("Invalid model: %s", providerErr.Message)
+	case provider.ErrorCodeCapabilityMismatch:
+		return contracts.FailureCategoryProvider, string(provider.ErrorCodeCapabilityMismatch), contracts.TerminalOutcomeValidationFailure, providerErr.Retryable, fmt.Sprintf("Capability mismatch: %s", providerErr.Message)
 	case provider.ErrorCodeAuthUnavailable, provider.ErrorCodeAuthFailed:
 		return contracts.FailureCategoryAuth, string(providerErr.Code), contracts.TerminalOutcomeProviderFailure, providerErr.Retryable, fmt.Sprintf("Provider auth failed: %s", providerErr.Message)
 	case provider.ErrorCodeProviderRequestFailed:
