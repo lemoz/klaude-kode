@@ -16,6 +16,7 @@ import {
   loginOpenRouter,
   makeUpdateSessionSettingCommand,
   makeUserInputCommand,
+  runBenchmarkEval,
   runReplayEval,
   showRun,
   summarizeRuns,
@@ -208,6 +209,13 @@ async function runInteractiveLoop(
         if (slashCommand?.kind === "validate_candidate") {
           const validation = await validateCandidate(config);
           renderCandidateValidation(ui, validation);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "run_benchmark") {
+          const benchmarkPath = path.resolve(config.cwd, slashCommand.benchmarkPath);
+          const evalRun = await runBenchmarkEval(config, benchmarkPath);
+          renderEvalRun(ui, evalRun);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -523,6 +531,7 @@ function parseSlashCommand(
   | { kind: "summarize_runs" }
   | { kind: "show_run"; runID: string }
   | { kind: "validate_candidate" }
+  | { kind: "run_benchmark"; benchmarkPath: string }
   | { kind: "run_replay"; replayPath: string }
   | { kind: "export_replay"; outputPath: string }
   | { kind: "models"; profileId?: string }
@@ -554,6 +563,13 @@ function parseSlashCommand(
   }
   if (trimmed === "/validate-candidate") {
     return { kind: "validate_candidate" };
+  }
+  if (trimmed.startsWith("/run-benchmark ")) {
+    const benchmarkPath = trimmed.slice("/run-benchmark ".length).trim();
+    if (benchmarkPath === "") {
+      throw new Error("usage: /run-benchmark <path>");
+    }
+    return { kind: "run_benchmark", benchmarkPath };
   }
   if (trimmed.startsWith("/run-replay ")) {
     const replayPath = trimmed.slice("/run-replay ".length).trim();
@@ -896,6 +912,7 @@ function printHelp(): void {
     "  /summarize-runs",
     "  /show-run <id>",
     "  /validate-candidate",
+    "  /run-benchmark <path>",
     "  /run-replay <path>",
     "  /export-replay <path>",
     "  /models [profile-id]",

@@ -443,6 +443,20 @@ export async function runReplayEval(
   return JSON.parse(stdout) as EvalRun;
 }
 
+export async function runBenchmarkEval(
+  config: Pick<ShellConfig, "stateRoot" | "cwd">,
+  benchmarkPath: string,
+): Promise<EvalRun> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    "-run-benchmark-eval",
+    `-cwd=${config.cwd}`,
+    `-benchmark-path=${benchmarkPath}`,
+    `-state-root=${config.stateRoot}`,
+  ]);
+  return JSON.parse(stdout) as EvalRun;
+}
+
 export async function summarizeRuns(
   config: Pick<ShellConfig, "stateRoot" | "cwd">,
 ): Promise<EvalRunSummary> {
