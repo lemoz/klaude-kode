@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/harness"
@@ -509,6 +510,70 @@ func TestRunDiffRunsText(t *testing.T) {
 	}
 	if !strings.Contains(output, "case_diffs: 1") {
 		t.Fatalf("expected case diff count in output, got %q", output)
+	}
+}
+
+func TestRunListFrontierText(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	artifactRoot := harness.DefaultArtifactRoot(candidateRoot)
+	for _, run := range []harness.EvalRun{
+		{
+			ID:            "run_low",
+			Kind:          harness.EvalRunKindReplay,
+			SchemaVersion: contracts.SchemaVersionV1,
+			CreatedAt:     time.Unix(100, 0).UTC(),
+			Status:        harness.EvalRunStatusFailed,
+			Score:         0.5,
+			Failure: &harness.EvalFailureSummary{
+				Code:      "benchmark_cases_failed",
+				Message:   "1 benchmark cases failed",
+				Retryable: false,
+			},
+		},
+		{
+			ID:            "run_high_old",
+			Kind:          harness.EvalRunKindReplay,
+			SchemaVersion: contracts.SchemaVersionV1,
+			CreatedAt:     time.Unix(200, 0).UTC(),
+			Status:        harness.EvalRunStatusCompleted,
+			Score:         1,
+		},
+		{
+			ID:            "run_high_new",
+			Kind:          harness.EvalRunKindBenchmark,
+			SchemaVersion: contracts.SchemaVersionV1,
+			CreatedAt:     time.Unix(300, 0).UTC(),
+			Status:        harness.EvalRunStatusCompleted,
+			Score:         1,
+			Benchmark: &harness.BenchmarkRunMetadata{
+				Name: "baseline-pack",
+			},
+		},
+	} {
+		if _, err := harness.PersistEvalRun(artifactRoot, run); err != nil {
+			t.Fatalf("PersistEvalRun returned error: %v", err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-list-frontier",
+		"-frontier-limit=2",
+		"-cwd=" + candidateRoot,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("list frontier returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc frontier") {
+		t.Fatalf("expected frontier header, got %q", output)
+	}
+	if !strings.Contains(output, "entries: 2") {
+		t.Fatalf("expected entry count in frontier output, got %q", output)
+	}
+	if !strings.Contains(output, "run_high_new") || !strings.Contains(output, "run_high_old") {
+		t.Fatalf("expected top frontier entries in output, got %q", output)
 	}
 }
 
