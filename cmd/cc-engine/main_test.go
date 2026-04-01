@@ -464,6 +464,85 @@ func TestRunBenchmarkEvalJSON(t *testing.T) {
 	}
 }
 
+func TestRunDiffRunsJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	artifactRoot := harness.DefaultArtifactRoot(candidateRoot)
+	left := harness.EvalRun{
+		ID:            "run_left",
+		Kind:          harness.EvalRunKindBenchmark,
+		SchemaVersion: contracts.SchemaVersionV1,
+		Candidate: harness.CandidateBundle{
+			Root: candidateRoot,
+		},
+		Status: harness.EvalRunStatusFailed,
+		Score:  0.5,
+		CaseResults: []harness.BenchmarkCaseResult{
+			{
+				ID:     "case_a",
+				Status: harness.EvalRunStatusFailed,
+				Score:  0,
+				Failure: &harness.EvalFailureSummary{
+					Code:      "replay_terminal_outcome",
+					Message:   "replay pack terminal outcome is task_failure",
+					Retryable: false,
+				},
+			},
+		},
+		Failure: &harness.EvalFailureSummary{
+			Code:      "benchmark_cases_failed",
+			Message:   "1 benchmark cases failed",
+			Retryable: false,
+		},
+	}
+	right := harness.EvalRun{
+		ID:            "run_right",
+		Kind:          harness.EvalRunKindBenchmark,
+		SchemaVersion: contracts.SchemaVersionV1,
+		Candidate: harness.CandidateBundle{
+			Root: candidateRoot,
+		},
+		Status: harness.EvalRunStatusCompleted,
+		Score:  1,
+		CaseResults: []harness.BenchmarkCaseResult{
+			{
+				ID:     "case_a",
+				Status: harness.EvalRunStatusCompleted,
+				Score:  1,
+			},
+		},
+	}
+
+	if _, err := harness.PersistEvalRun(artifactRoot, left); err != nil {
+		t.Fatalf("PersistEvalRun left returned error: %v", err)
+	}
+	if _, err := harness.PersistEvalRun(artifactRoot, right); err != nil {
+		t.Fatalf("PersistEvalRun right returned error: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-format=json",
+		"-diff-runs",
+		"-cwd=" + candidateRoot,
+		"-left-run-id=" + left.ID,
+		"-right-run-id=" + right.ID,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("diff runs returned error: %v", err)
+	}
+
+	var got harness.EvalRunDiff
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse diff output: %v", err)
+	}
+	if got.ScoreDelta != 0.5 {
+		t.Fatalf("expected score delta 0.5, got %#v", got)
+	}
+	if len(got.CaseDiffs) != 1 || got.CaseDiffs[0].ScoreDelta != 1 {
+		t.Fatalf("expected one improving case diff, got %#v", got)
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
