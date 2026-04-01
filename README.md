@@ -17,9 +17,9 @@ UX target:
 This repo currently contains:
 
 - an RFC-grade rewrite blueprint
-- an initial repository layout
-- compile-safe Go interfaces and starter binaries
-- a thin TS shell placeholder
+- a working Go engine/CLI baseline
+- a working TS shell baseline over stdio
+- persisted harness artifacts and offline replay/benchmark workflows
 - a phased roadmap that requires verification, testing, commit, and push after
   every implementation step
 
@@ -46,17 +46,24 @@ This repo currently contains:
 
 ## Current Status
 
-This repo is intentionally in blueprint-and-scaffold state. It is not yet a
-working Claude Code replacement.
+This repo is not yet a full Claude Code replacement, but it is past
+blueprint-only state. The current implementation supports:
+
+- persisted sessions, replay/resume, and local shell transport
+- Anthropic API key, Anthropic OAuth, and OpenRouter API-key profiles
+- live provider-backed CLI and shell turns
+- replay-pack export
+- candidate validation
+- replay eval and benchmark eval
+- run summaries, run inspection, diffing, and frontier listing
 
 The next implementation steps are:
 
-1. Build the canonical event schema and transport framing in Go.
-2. Implement headless local sessions in `cc-engine`.
-3. Wire the TS shell to engine events over stdio.
-4. Add Anthropic and OpenRouter provider adapters.
-5. Move tool runtime, permissions, replay, and MCP into engine-owned services.
-6. Add harness-facing replay/eval artifacts and offline benchmark workflows.
+1. Expand MCP, remote, and detached session support.
+2. Deepen tool runtime parity and permissions policy.
+3. Harden provider capability enforcement and model metadata.
+4. Extend harness reporting, candidate metadata, and external evaluator hooks.
+5. Continue UI/UX parity work under the Klaude Kode brand.
 
 ## Working Agreement
 
@@ -89,6 +96,56 @@ npm run check
 npm run dev
 ```
 
+## Harness Quickstart
+
+Repository fixtures:
+
+- [pass-basic.json](/Users/cdossman/klaude-kode/benchmarks/replays/pass-basic.json)
+- [fail-basic.json](/Users/cdossman/klaude-kode/benchmarks/replays/fail-basic.json)
+- [mixed-basic.json](/Users/cdossman/klaude-kode/benchmarks/packs/mixed-basic.json)
+
+Validate a candidate:
+
+```bash
+go run ./cmd/cc-engine -validate-candidate -cwd=/path/to/candidate
+go run ./cmd/cc -validate-candidate -cwd=/path/to/candidate
+```
+
+Run replay and benchmark evals:
+
+```bash
+go run ./cmd/cc-engine \
+  -run-replay-eval \
+  -cwd=/path/to/candidate \
+  -replay-path=/Users/cdossman/klaude-kode/benchmarks/replays/pass-basic.json
+
+go run ./cmd/cc-engine \
+  -run-benchmark-eval \
+  -cwd=/path/to/candidate \
+  -benchmark-path=/Users/cdossman/klaude-kode/benchmarks/packs/mixed-basic.json
+```
+
+Inspect persisted runs:
+
+```bash
+go run ./cmd/cc-engine -summarize-runs -cwd=/path/to/candidate
+go run ./cmd/cc-engine -list-frontier -cwd=/path/to/candidate -frontier-limit=5
+go run ./cmd/cc-engine -show-run -cwd=/path/to/candidate -run-id=<run-id>
+go run ./cmd/cc-engine -diff-runs -cwd=/path/to/candidate -left-run-id=<left> -right-run-id=<right>
+```
+
+Shell equivalents:
+
+```text
+/validate-candidate
+/run-replay /Users/cdossman/klaude-kode/benchmarks/replays/pass-basic.json
+/run-benchmark /Users/cdossman/klaude-kode/benchmarks/packs/mixed-basic.json
+/summarize-runs
+/list-frontier 5
+/show-run <run-id>
+/diff-runs <left-run-id> <right-run-id>
+```
+
 ## Blueprint Docs
 
 - [01-rfc-architecture.md](/Users/cdossman/klaude-kode/docs/01-rfc-architecture.md)
@@ -97,3 +154,5 @@ npm run dev
 - [04-compatibility-matrix.md](/Users/cdossman/klaude-kode/docs/04-compatibility-matrix.md)
 - [05-roadmap.md](/Users/cdossman/klaude-kode/docs/05-roadmap.md)
 - [06-test-benchmarks.md](/Users/cdossman/klaude-kode/docs/06-test-benchmarks.md)
+- [07-harness-schemas.md](/Users/cdossman/klaude-kode/docs/07-harness-schemas.md)
+- [08-harness-workflows.md](/Users/cdossman/klaude-kode/docs/08-harness-workflows.md)
