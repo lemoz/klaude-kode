@@ -414,6 +414,56 @@ func TestRunShowRunJSON(t *testing.T) {
 	}
 }
 
+func TestRunBenchmarkEvalJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	benchmarkRoot := t.TempDir()
+	successReplay := writeReplayPackNamed(t, benchmarkRoot, "success.json", contracts.TerminalOutcomeSuccess)
+	_ = writeReplayPackNamed(t, benchmarkRoot, "failure.json", contracts.TerminalOutcomeTaskFailure)
+	benchmarkPath := writeBenchmarkPack(t, benchmarkRoot, []harness.BenchmarkCase{
+		{
+			ID:         "case_success",
+			ReplayPath: filepath.Base(successReplay),
+			Weight:     1,
+		},
+		{
+			ID:         "case_failure",
+			ReplayPath: "failure.json",
+			Weight:     1,
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-format=json",
+		"-run-benchmark-eval",
+		"-cwd=" + candidateRoot,
+		"-benchmark-path=" + benchmarkPath,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var got harness.EvalRun
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse benchmark eval output: %v", err)
+	}
+	if got.Kind != harness.EvalRunKindBenchmark {
+		t.Fatalf("expected benchmark eval kind, got %#v", got)
+	}
+	if got.Benchmark == nil || got.Benchmark.Path != benchmarkPath {
+		t.Fatalf("expected benchmark metadata for %s, got %#v", benchmarkPath, got)
+	}
+	if len(got.CaseResults) != 2 {
+		t.Fatalf("expected 2 case results, got %#v", got)
+	}
+	if got.Status != harness.EvalRunStatusFailed {
+		t.Fatalf("expected failed benchmark due to one failed case, got %#v", got)
+	}
+	if _, err := os.Stat(harness.EvalRunPath(harness.DefaultArtifactRoot(candidateRoot), got.ID)); err != nil {
+		t.Fatalf("expected persisted benchmark eval run artifact: %v", err)
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -655,23 +705,27 @@ func createValidCandidateRoot(t *testing.T) string {
 }
 
 func writeReplayPack(t *testing.T, root string, terminalOutcome contracts.TerminalOutcome) string {
+	return writeReplayPackNamed(t, root, "replay.json", terminalOutcome)
+}
+
+func writeReplayPackNamed(t *testing.T, root string, name string, terminalOutcome contracts.TerminalOutcome) string {
 	t.Helper()
 
-	replayPath := filepath.Join(root, "replay.json")
+	replayPath := filepath.Join(root, name)
 	replay := contracts.ReplayPack{
 		SchemaVersion: contracts.SchemaVersionV1,
 		Session: contracts.SessionHandle{
-			SessionID: "replay-session",
+			SessionID: "replay-session-" + name,
 		},
 		Summary: contracts.SessionSummary{
-			SessionID:       "replay-session",
+			SessionID:       "replay-session-" + name,
 			Status:          contracts.SessionStatusClosed,
 			TerminalOutcome: terminalOutcome,
 		},
 		Events: []contracts.SessionEvent{
 			{
 				SchemaVersion: contracts.SchemaVersionV1,
-				SessionID:     "replay-session",
+				SessionID:     "replay-session-" + name,
 				Sequence:      1,
 				Kind:          contracts.EventKindSessionClosed,
 			},
@@ -685,6 +739,26 @@ func writeReplayPack(t *testing.T, root string, terminalOutcome contracts.Termin
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 	return replayPath
+}
+
+func writeBenchmarkPack(t *testing.T, root string, cases []harness.BenchmarkCase) string {
+	t.Helper()
+
+	benchmarkPath := filepath.Join(root, "benchmark.json")
+	pack := harness.BenchmarkPack{
+		SchemaVersion: contracts.SchemaVersionV1,
+		Name:          "baseline-pack",
+		Description:   "baseline replay benchmark pack",
+		Cases:         cases,
+	}
+	encoded, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
+	}
+	if err := os.WriteFile(benchmarkPath, encoded, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	return benchmarkPath
 }
 
 func TestRunToolPromptIncludesPermissionAndToolEvents(t *testing.T) {
