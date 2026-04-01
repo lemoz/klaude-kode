@@ -61,6 +61,7 @@ interface LineWriter {
 
 type ShellSurface =
   | "conversation"
+  | "help"
   | "profiles"
   | "status"
   | "models"
@@ -350,6 +351,11 @@ async function handleShellInputLine(
     const profiles = await listProfiles(config);
     ui.setProfileStatuses(profiles);
     renderProfiles(ui, profiles, config.profileId);
+    return;
+  }
+  if (slashCommand?.kind === "help") {
+    ui.setActiveSurface("help");
+    renderHelp(ui);
     return;
   }
   if (slashCommand?.kind === "status") {
@@ -741,10 +747,18 @@ function buildInteractiveFooter(
     sessionStatus: closed ? "closed" : state?.status ?? "starting",
     terminalOutcome: state?.terminal_outcome || "none",
     pendingPermission: pendingPermission ? "awaiting_decision" : "none",
-    modeCue: surface.includes("eval") || surface === "runs" || surface === "frontier" || surface === "diff"
-      ? "artifact_view"
-      : "conversation_view",
+    modeCue: renderSurfaceCue(surface),
   };
+}
+
+function renderSurfaceCue(surface: ShellSurface): string {
+  if (surface === "help") {
+    return "help_view";
+  }
+  if (surface.includes("eval") || surface === "runs" || surface === "frontier" || surface === "diff") {
+    return "artifact_view";
+  }
+  return "conversation_view";
 }
 
 function buildInteractivePromptState(
@@ -850,6 +864,7 @@ function parseSlashCommand(
   line: string,
 ):
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
+  | { kind: "help" }
   | { kind: "profiles" }
   | { kind: "status" }
   | { kind: "summarize_runs" }
@@ -873,6 +888,9 @@ function parseSlashCommand(
 
   if (trimmed === "/profiles") {
     return { kind: "profiles" };
+  }
+  if (trimmed === "/help") {
+    return { kind: "help" };
   }
   if (trimmed === "/status") {
     return { kind: "status" };
@@ -1082,6 +1100,19 @@ function renderProfiles(
       ui.writeLine(`  capabilities: ${capabilities}`);
     }
   }
+}
+
+function renderHelp(ui: LineWriter): void {
+  ui.writeLine("help:");
+  ui.writeLine("- prompts: type a message and press Enter");
+  ui.writeLine("- exit: /exit");
+  ui.writeLine("- auth: /login anthropic oauth | /login anthropic <env-var> | /login openrouter <env-var>");
+  ui.writeLine("- profiles: /profiles | /profile <id> | /logout [anthropic|openrouter]");
+  ui.writeLine("- models: /models [profile-id] | /model <id>");
+  ui.writeLine("- session: /status");
+  ui.writeLine("- harness: /validate-candidate | /run-replay <path> | /run-benchmark <path>");
+  ui.writeLine("- reports: /summarize-runs | /show-run <id> | /list-frontier [limit] | /diff-runs <left> <right>");
+  ui.writeLine("- export: /export-replay <path>");
 }
 
 function renderStatus(
