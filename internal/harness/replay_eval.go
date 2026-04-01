@@ -15,6 +15,7 @@ func RunReplayEval(candidateRoot string, replayPath string) (EvalRun, error) {
 
 	run := EvalRun{
 		ID:            fmt.Sprintf("run_%d", time.Now().UTC().UnixNano()),
+		Kind:          EvalRunKindReplay,
 		SchemaVersion: contracts.SchemaVersionV1,
 		CreatedAt:     time.Now().UTC(),
 		Candidate:     validation.Candidate,

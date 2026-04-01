@@ -5,6 +5,8 @@ import "time"
 const (
 	EvalRunStatusCompleted = "completed"
 	EvalRunStatusFailed    = "failed"
+	EvalRunKindReplay      = "replay"
+	EvalRunKindBenchmark   = "benchmark"
 )
 
 type CandidateBundle struct {
@@ -23,15 +25,34 @@ type EvalFailureSummary struct {
 	Retryable bool   `json:"retryable"`
 }
 
+type BenchmarkRunMetadata struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Path        string `json:"path"`
+	CaseCount   int    `json:"case_count"`
+}
+
+type BenchmarkCaseResult struct {
+	ID         string              `json:"id"`
+	ReplayPath string              `json:"replay_path"`
+	Weight     float64             `json:"weight"`
+	Status     string              `json:"status"`
+	Score      float64             `json:"score"`
+	Failure    *EvalFailureSummary `json:"failure"`
+}
+
 type EvalRun struct {
-	ID            string              `json:"id"`
-	SchemaVersion string              `json:"schema_version"`
-	CreatedAt     time.Time           `json:"created_at"`
-	Candidate     CandidateBundle     `json:"candidate"`
-	ReplayPath    string              `json:"replay_path"`
-	Status        string              `json:"status"`
-	Score         float64             `json:"score"`
-	Failure       *EvalFailureSummary `json:"failure"`
+	ID            string                `json:"id"`
+	Kind          string                `json:"kind"`
+	SchemaVersion string                `json:"schema_version"`
+	CreatedAt     time.Time             `json:"created_at"`
+	Candidate     CandidateBundle       `json:"candidate"`
+	ReplayPath    string                `json:"replay_path"`
+	Benchmark     *BenchmarkRunMetadata `json:"benchmark"`
+	Status        string                `json:"status"`
+	Score         float64               `json:"score"`
+	CaseResults   []BenchmarkCaseResult `json:"case_results"`
+	Failure       *EvalFailureSummary   `json:"failure"`
 }
 
 type EvalRunSummary struct {

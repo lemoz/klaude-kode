@@ -59,6 +59,9 @@ func TestRunReplayEvalReturnsCompletedRunForValidCandidateAndReplay(t *testing.T
 	if run.Status != EvalRunStatusCompleted {
 		t.Fatalf("expected completed eval run, got %#v", run)
 	}
+	if run.Kind != EvalRunKindReplay {
+		t.Fatalf("expected replay eval kind, got %#v", run)
+	}
 	if run.Score != 1 {
 		t.Fatalf("expected score 1, got %#v", run)
 	}
