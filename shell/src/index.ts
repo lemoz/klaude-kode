@@ -37,6 +37,7 @@ import {
   type SessionStateSnapshot,
   type ShellConfig,
   type FrontierEntry,
+  type ModelCatalog,
 } from "./engineClient.js";
 import {
   type ArtifactView,
@@ -113,6 +114,17 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   let activeSurface: ShellSurface = "conversation";
   let artifactView: ArtifactView | null = null;
   let exiting = false;
+
+  try {
+    const [profiles, catalog] = await Promise.all([
+      listProfiles(config),
+      listModels(config),
+    ]);
+    profileStatuses = profiles;
+    applyResolvedShellDefaults(config, catalog);
+  } catch {
+    profileStatuses = [];
+  }
 
   const appendLine = (line: string) => {
     if (!shouldKeepOperationLine(line)) {
@@ -234,11 +246,6 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       }
       rerender();
     });
-    try {
-      profileStatuses = await listProfiles(config);
-    } catch {
-      profileStatuses = [];
-    }
     busy = false;
     rerender();
 
@@ -345,6 +352,15 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
         rerender();
       }
     }
+  }
+}
+
+function applyResolvedShellDefaults(config: ShellConfig, catalog: ModelCatalog): void {
+  if (config.profileId.trim() === "" && catalog.profile_id.trim() !== "") {
+    config.profileId = catalog.profile_id.trim();
+  }
+  if (config.model.trim() === "" && catalog.default_model.trim() !== "") {
+    config.model = catalog.default_model.trim();
   }
 }
 
