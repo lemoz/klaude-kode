@@ -636,6 +636,59 @@ func TestRunListFrontierJSON(t *testing.T) {
 	}
 }
 
+func TestRunListFrontierWithRepositoryFixturesJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	benchmarkPath := filepath.Join("/Users/cdossman/klaude-kode", "benchmarks", "packs", "mixed-basic.json")
+	replayPath := filepath.Join("/Users/cdossman/klaude-kode", "benchmarks", "replays", "pass-basic.json")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-format=json",
+		"-run-benchmark-eval",
+		"-cwd=" + candidateRoot,
+		"-benchmark-path=" + benchmarkPath,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("benchmark eval run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := run([]string{
+		"-format=json",
+		"-run-replay-eval",
+		"-cwd=" + candidateRoot,
+		"-replay-path=" + replayPath,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("replay eval run returned error: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := run([]string{
+		"-format=json",
+		"-list-frontier",
+		"-frontier-limit=2",
+		"-cwd=" + candidateRoot,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("list frontier returned error: %v", err)
+	}
+
+	var got []harness.FrontierEntry
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse frontier output: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 frontier entries, got %#v", got)
+	}
+	if got[0].Score != 1 {
+		t.Fatalf("expected top frontier entry to be the passing replay fixture, got %#v", got)
+	}
+	if got[1].Benchmark != "mixed-basic" {
+		t.Fatalf("expected second frontier entry to be mixed-basic benchmark, got %#v", got)
+	}
+}
+
 func TestRunUpsertProfileMakesNewDefault(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
