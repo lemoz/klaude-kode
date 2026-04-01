@@ -30,6 +30,7 @@ export interface InteractivePromptState {
 export interface InteractiveShellProps {
   header: InteractiveShellHeader;
   footer: InteractiveShellFooter;
+  hints: string[];
   turns: TranscriptTurn[];
   lines: string[];
   pendingPermission: PermissionEventPayload | null;
@@ -61,7 +62,14 @@ export function InteractiveShell(props: InteractiveShellProps) {
         </Box>
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>Type /help for commands. Type /exit to close the session.</Text>
+        <Box flexDirection="column">
+          <Text dimColor>Type /help for commands. Type /exit to close the session.</Text>
+          {props.hints.map((hint, index) => (
+            <Text key={`${index}:${hint}`} dimColor>
+              {hint}
+            </Text>
+          ))}
+        </Box>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {props.turns.map((turn) => {

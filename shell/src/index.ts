@@ -154,10 +154,13 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
     buildInteractiveFooter(model.currentState(), ui.pendingPermission(), closed, activeSurface);
   const renderPromptState = (): InteractivePromptState =>
     buildInteractivePromptState(ui.pendingPermission(), busy, closed);
+  const renderHints = (): string[] =>
+    buildInteractiveHints(config, model.currentState(), profileStatuses, activeSurface);
   const renderShell = () =>
     React.createElement(InteractiveShell, {
       header: renderHeader(),
       footer: renderFooter(),
+      hints: renderHints(),
       turns: model.transcript(),
       lines,
       pendingPermission: ui.pendingPermission(),
@@ -749,6 +752,41 @@ function buildInteractiveFooter(
     pendingPermission: pendingPermission ? "awaiting_decision" : "none",
     modeCue: renderSurfaceCue(surface),
   };
+}
+
+function buildInteractiveHints(
+  config: ShellConfig,
+  state: SessionStateSnapshot | null,
+  profiles: ProfileStatus[],
+  surface: ShellSurface,
+): string[] {
+  const profileId = state?.profile_id || config.profileId || "anthropic-main";
+  const activeProfile = profiles.find((entry) => entry.profile.id === profileId);
+  const hints: string[] = [];
+
+  if (!activeProfile || activeProfile.auth.state === "logged_out" || activeProfile.auth.state === "unknown") {
+    hints.push("auth: /login anthropic oauth or /login openrouter OPENROUTER_API_KEY");
+  } else {
+    hints.push(`profile: /profiles | /profile ${profileId} | /models ${profileId}`);
+  }
+
+  if (surface === "conversation" || surface === "help" || surface === "profiles" || surface === "models") {
+    hints.push("workflow: /status | /export-replay ./artifacts/replay.json | /run-replay benchmarks/replays/pass-basic.json");
+    return hints;
+  }
+
+  if (surface === "replay_eval" || surface === "benchmark_eval" || surface === "runs") {
+    hints.push("reports: /summarize-runs | /show-run <id> | /list-frontier 5");
+    return hints;
+  }
+
+  if (surface === "frontier" || surface === "diff" || surface === "validation") {
+    hints.push("compare: /diff-runs <left> <right> | /run-benchmark benchmarks/packs/mixed-basic.json");
+    return hints;
+  }
+
+  hints.push("workflow: /status | /profiles | /help");
+  return hints;
 }
 
 function renderSurfaceCue(surface: ShellSurface): string {
