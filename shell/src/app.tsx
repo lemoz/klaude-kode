@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { Box, Static, Text, useApp } from "ink";
+import { Box, Text, useApp } from "ink";
 import type { TranscriptTurn } from "./presentation.js";
 import type { PermissionEventPayload } from "./engineClient.js";
 
@@ -188,13 +188,11 @@ export function InteractiveShell(props: InteractiveShellProps) {
       {props.lines.length > 0 ? (
         <Box borderStyle="round" borderColor={SHELL_THEME.activity} paddingX={1} flexDirection="column" marginTop={1}>
           <Text color={SHELL_THEME.activity}>Operations</Text>
-          <Static items={props.lines}>
-            {(line, index) => (
-              <Text key={`${index}:${line}`} dimColor>
-                {line}
-              </Text>
-            )}
-          </Static>
+          {props.lines.map((line, index) => (
+            <Text key={`${index}:${line}`} dimColor>
+              {line}
+            </Text>
+          ))}
         </Box>
       ) : null}
       <Box borderStyle="round" borderColor={SHELL_THEME.chrome} paddingX={1} marginTop={1}>
