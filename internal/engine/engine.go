@@ -999,7 +999,7 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 	if requestedToolChoice := parseRequestedToolChoice(metadata); requestedToolChoice != "" {
 		completionRequest.ToolChoice = requestedToolChoice
 	}
-	if err := validateCapabilityRequirements(profile, model, capabilities, completionRequest, metadata); err != nil {
+	if err := e.enforceCapabilityRequirementsLocked(record, turnID, commandID, profile, model, capabilities, &completionRequest, metadata); err != nil {
 		category, code, outcome, retryable, assistantMessage := classifyProviderFailure(err)
 		if emitErr := e.emitFailureDetailedLocked(record, turnID, commandID, category, code, err, outcome, retryable); emitErr != nil {
 			return turnResult{}, emitErr
@@ -1052,25 +1052,54 @@ func (e *InMemoryEngine) executeProviderTurnLocked(record *sessionRecord, turnID
 	}, nil
 }
 
-func validateCapabilityRequirements(profile contracts.AuthProfile, model string, capabilities contracts.CapabilitySet, req contracts.CompletionRequest, metadata map[string]string) error {
-	if req.ToolChoice == contracts.ToolChoiceAuto && !capabilities.ToolCalling {
-		return capabilityMismatch(profile, model, "tool calling")
-	}
-	if metadataEnabled(metadata, "structured_output") && !capabilities.StructuredOutputs {
-		return capabilityMismatch(profile, model, "structured outputs")
-	}
-	if metadataEnabled(metadata, "deferred_tool_search") && !capabilities.DeferredToolSearch {
-		return capabilityMismatch(profile, model, "deferred tool search")
+func (e *InMemoryEngine) enforceCapabilityRequirementsLocked(record *sessionRecord, turnID string, commandID string, profile contracts.AuthProfile, model string, capabilities contracts.CapabilitySet, req *contracts.CompletionRequest, metadata map[string]string) error {
+	allowFallback := metadataEnabled(metadata, "allow_capability_fallback")
+	checks := []struct {
+		enabled bool
+		feature string
+		disable func()
+	}{
+		{
+			enabled: req.ToolChoice == contracts.ToolChoiceAuto && !capabilities.ToolCalling,
+			feature: "tool calling",
+			disable: func() {
+				req.ToolChoice = contracts.ToolChoiceNone
+			},
+		},
+		{
+			enabled: metadataEnabled(metadata, "structured_output") && !capabilities.StructuredOutputs,
+			feature: "structured outputs",
+		},
+		{
+			enabled: metadataEnabled(metadata, "deferred_tool_search") && !capabilities.DeferredToolSearch,
+			feature: "deferred tool search",
+		},
+		{
+			enabled: strings.EqualFold(strings.TrimSpace(metadata["input_kind"]), "image") && !capabilities.ImageInput,
+			feature: "image input",
+		},
+		{
+			enabled: strings.EqualFold(strings.TrimSpace(metadata["input_kind"]), "document") && !capabilities.DocumentInput,
+			feature: "document input",
+		},
 	}
 
-	switch strings.ToLower(strings.TrimSpace(metadata["input_kind"])) {
-	case "image":
-		if !capabilities.ImageInput {
-			return capabilityMismatch(profile, model, "image input")
+	for _, check := range checks {
+		if !check.enabled {
+			continue
 		}
-	case "document":
-		if !capabilities.DocumentInput {
-			return capabilityMismatch(profile, model, "document input")
+		if !allowFallback {
+			return capabilityMismatch(profile, model, check.feature)
+		}
+		if check.disable != nil {
+			check.disable()
+		}
+		if _, err := e.appendEventLocked(record, contracts.EventKindWarning, contracts.SessionEventPayload{
+			CommandID: commandID,
+			TurnID:    turnID,
+			Warning:   fmt.Sprintf("provider %s model %s does not support %s; continuing with capability fallback", profile.Provider, model, check.feature),
+		}); err != nil {
+			return err
 		}
 	}
 

@@ -652,6 +652,56 @@ func TestProviderTurnFailsWhenRequestedCapabilityIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestProviderTurnWarnsAndFallsBackWhenCapabilityFallbackIsAllowed(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_capability_fallback",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: "openrouter-main",
+		Model:     "openrouter/auto",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "hello fallback capability",
+			Source: contracts.MessageSourceInteractive,
+			Metadata: map[string]string{
+				"deferred_tool_search":     "true",
+				"allow_capability_fallback": "true",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	if events[4].Kind != contracts.EventKindWarning {
+		t.Fatalf("expected warning event at sequence 5, got %s", events[4].Kind)
+	}
+	if !strings.Contains(events[4].Payload.Warning, "continuing with capability fallback") {
+		t.Fatalf("expected capability fallback warning, got %q", events[4].Payload.Warning)
+	}
+	if events[5].Kind != contracts.EventKindAssistantDelta {
+		t.Fatalf("expected assistant delta after fallback warning, got %s", events[5].Kind)
+	}
+	if events[6].Kind != contracts.EventKindAssistantMessage {
+		t.Fatalf("expected assistant message after fallback warning, got %s", events[6].Kind)
+	}
+	if events[8].Kind != contracts.EventKindSessionState || events[8].Payload.State == nil || events[8].Payload.State.TerminalOutcome != contracts.TerminalOutcomeSuccess {
+		t.Fatalf("expected success state snapshot after fallback, got %#v", events[8].Payload.State)
+	}
+}
+
 func TestMissingEnvCredentialProducesAuthFailure(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
