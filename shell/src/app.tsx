@@ -54,6 +54,16 @@ export function InteractiveShell(props: InteractiveShellProps) {
               {turn.userMessage !== "" ? (
                 <Text color="yellow">you: {turn.userMessage}</Text>
               ) : null}
+              {turn.toolCalls.map((tool) => {
+                const lastProgress = tool.progressMessages[tool.progressMessages.length - 1] ?? "";
+                const status = tool.resultSummary || lastProgress || "requested";
+                const detail = tool.output !== "" ? `${status} output=${tool.output}` : status;
+                return (
+                  <Text key={tool.callId} color={tool.failed ? "red" : "magenta"}>
+                    tool:{tool.name} {detail}
+                  </Text>
+                );
+              })}
               {assistantText !== "" ? (
                 <Text color="cyan">
                   klaude: {assistantText}

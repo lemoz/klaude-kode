@@ -635,7 +635,10 @@ function renderInteractiveEvent(
   if (
     event.kind === "user_message_accepted" ||
     event.kind === "assistant_delta" ||
-    event.kind === "assistant_message"
+    event.kind === "assistant_message" ||
+    event.kind === "tool_call_requested" ||
+    event.kind === "tool_call_progress" ||
+    event.kind === "tool_call_completed"
   ) {
     return lines;
   }
