@@ -45,6 +45,19 @@ type EvalRunSummary struct {
 	FailureCodes map[string]int `json:"failure_codes"`
 }
 
+type BenchmarkCase struct {
+	ID         string  `json:"id"`
+	ReplayPath string  `json:"replay_path"`
+	Weight     float64 `json:"weight"`
+}
+
+type BenchmarkPack struct {
+	SchemaVersion string          `json:"schema_version"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Cases         []BenchmarkCase `json:"cases"`
+}
+
 type CandidateValidationResult struct {
 	Valid     bool            `json:"valid"`
 	Issues    []string        `json:"issues"`
