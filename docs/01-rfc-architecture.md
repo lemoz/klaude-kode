@@ -18,6 +18,9 @@ monolithic REPL/state ownership.
 
 - Preserve user-visible workflows for local sessions, non-interactive modes,
   tools, MCP, resume, remote/assistant flows, and config semantics.
+- Preserve the interaction shape of the current product for common flows:
+  prompt loop, transcript reading, slash-command discoverability, permission
+  prompts, profile/model switching, and status visibility.
 - Move hot-path runtime concerns out of the Bun/TS process.
 - Replace Anthropic-specific internal types with provider-neutral engine
   contracts.
@@ -25,11 +28,15 @@ monolithic REPL/state ownership.
   auth systems.
 - Make the transport, provider, tool, and session layers independently
   testable.
+- Apply a Klaude Kode rebrand in the shell layer instead of attempting a
+  pixel-perfect reproduction of Claude Code visuals.
 
 ## 3. Non-Goals
 
 - Bit-for-bit reproduction of current file layout, env quirks, or internal
   feature-gate behavior.
+- Pixel-perfect cloning of Claude Code's visual layout, typography, spacing, or
+  branding.
 - Preservation of internal-only Anthropic commands or ant-only operational
   tooling.
 - Full shell rewrite in Go for v1. The shell remains TS/Ink first, then may be
@@ -202,9 +209,38 @@ type SessionTransport interface {
 - viewport state
 - transient UI composition
 - client-side caching of event projections only
+- Klaude Kode brand treatment, copy style, and visual presentation
 
 The shell may derive view models from engine events, but it is never the
 source of truth for session semantics.
+
+## 7.3 UX Parity Policy
+
+The rewrite preserves behavioral UX, not literal visual duplication.
+
+Preserve:
+
+- primary prompt and response loop
+- transcript-first reading experience
+- streaming assistant output
+- visible permission decision points
+- slash-command ergonomics and discoverability
+- model/profile/session status visibility
+- resume and replay flows where user-visible
+
+Allow redesign:
+
+- typography, spacing, colors, and panel styling
+- wording and copy tone where functionality is unchanged
+- surface polish, affordances, and branding treatment
+- shell layout adjustments that improve clarity without changing the workflow
+
+Rebrand requirements:
+
+- all user-facing shell naming should prefer "Klaude Kode"
+- shell help, headers, status labels, and docs should speak in the new product
+  voice
+- preserve familiarity in control flow while making the product visibly its own
 
 ## 8. Storage Layout
 
@@ -500,4 +536,3 @@ This RFC is only considered implemented when:
 - MCP is supervised by the engine rather than ad hoc shell-owned state
 - compaction, retry, budgeting, and telemetry are engine-owned operational
   services
-

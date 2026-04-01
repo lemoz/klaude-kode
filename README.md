@@ -6,6 +6,14 @@ Klaude Kode is a new repo for a near-full-parity rewrite of Claude Code with:
 - a thin TypeScript shell for early UX parity
 - first-class Anthropic and OpenRouter provider support
 
+UX target:
+
+- preserve a similar day-to-day interaction model to Claude Code for common
+  workflows
+- do not chase pixel-perfect visual cloning
+- establish a distinct Klaude Kode brand, copy tone, and visual identity on top
+  of the preserved workflow shape
+
 This repo currently contains:
 
 - an RFC-grade rewrite blueprint

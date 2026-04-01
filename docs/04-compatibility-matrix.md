@@ -6,6 +6,12 @@ Compatibility target is behavioral parity. Preserve what users experience,
 simplify what is internally accidental, and drop what is internal-only or
 operationally specific to Anthropic.
 
+UI/UX parity policy:
+
+- preserve the recognizable interaction model and workflow shape
+- do not require exact visual reproduction
+- apply a distinct Klaude Kode rebrand in copy, naming, and styling
+
 ## 2. Preserve
 
 | Area | Current Anchor | Decision | Notes |
@@ -48,6 +54,7 @@ These are explicitly not required for parity:
 | Anthropic SDK block types as core runtime types | implementation detail to be removed |
 | Environment-variable quirks whose only purpose was rollout compatibility | replace with explicit profile and policy configuration |
 | UI-level ownership of session truth | replaced with engine-owned state |
+| Exact Claude Code visual styling | replaced with Klaude Kode branding over similar workflow patterns |
 
 ## 5. Slash Command Policy
 
@@ -132,4 +139,4 @@ Behavioral parity is considered reached when:
 - remote, SSH, direct-connect, and viewer flows operate on the new transport
 - importing config/history from the current system succeeds without destructive
   migration
-
+- the shell feels familiar in flow while remaining visibly and verbally its own

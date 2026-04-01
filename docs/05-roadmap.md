@@ -118,6 +118,7 @@ missing verification is called out explicitly in the commit/push handoff.
 - interactive local REPL
 - shell projections of engine state
 - artifact-aware rendering for diffs and large outputs
+- Klaude Kode-branded shell presentation over a familiar Claude Code-like flow
 
 ### Step Sequence
 
@@ -132,11 +133,14 @@ missing verification is called out explicitly in the commit/push handoff.
 - run `npm run check` after every shell change before commit/push
 - verify the shell remains projection-only for the touched behavior
 - manually exercise the updated UI flow against `cc-engine`
+- verify the changed flow stays familiar while the surface presentation remains
+  distinctly Klaude Kode
 
 ### Exit Criteria
 
 - shell contains no session source of truth
 - local interactive workflows reach parity for common usage
+- the shell is recognizably rebranded rather than a visual clone
 
 ## 6. Phase 3: Provider Expansion
 
