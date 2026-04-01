@@ -164,6 +164,51 @@ func TestStartSessionAppliesStoredDefaultProfileAndModel(t *testing.T) {
 	}
 }
 
+func TestStartSessionExplicitModelOverridesStoredDefaultProfile(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_explicit_model",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		Model:     "openrouter/auto",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if handle.ProfileID != "openrouter-main" {
+		t.Fatalf("expected openrouter-main for explicit openrouter model, got %s", handle.ProfileID)
+	}
+	if handle.Model != "openrouter/auto" {
+		t.Fatalf("expected explicit model to be preserved, got %s", handle.Model)
+	}
+}
+
+func TestStartSessionExplicitProfileWinsOverModelProviderHint(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_explicit_profile",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: "anthropic-main",
+		Model:     "openrouter/auto",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if handle.ProfileID != "anthropic-main" {
+		t.Fatalf("expected explicit profile anthropic-main to win, got %s", handle.ProfileID)
+	}
+	if handle.Model != "openrouter/auto" {
+		t.Fatalf("expected explicit model to be preserved, got %s", handle.Model)
+	}
+}
+
 func TestListProfilesReturnsStoredProfilesWithValidation(t *testing.T) {
 	ctx := context.Background()
 	runtime := NewInMemoryEngine()
