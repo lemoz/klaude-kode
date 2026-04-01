@@ -636,6 +636,9 @@ export async function loginAnthropicOAuth(
     apiBase?: string;
     accountScope?: string;
   },
+  options?: {
+    onStatusLine?: (line: string) => void;
+  },
 ): Promise<ProfileStatus[]> {
   const args = [
     "-format=json",
@@ -656,7 +659,9 @@ export async function loginAnthropicOAuth(
     args.push(`-account-scope=${input.accountScope.trim()}`);
   }
 
-  const stdout = await runEngineAdminCommand(args, { inheritStderr: true });
+  const stdout = await runEngineAdminCommand(args, {
+    onStderrLine: options?.onStatusLine,
+  });
   const parsed = JSON.parse(stdout) as { profiles?: ProfileStatus[] };
   return parsed.profiles ?? [];
 }
@@ -684,7 +689,7 @@ function buildEngineArgs(config: ShellConfig): string[] {
 
 async function runEngineAdminCommand(
   args: string[],
-  options?: { inheritStderr?: boolean },
+  options?: { onStderrLine?: (line: string) => void },
 ): Promise<string> {
   const child = spawn("go", ["run", "./cmd/cc-engine", ...args], {
     cwd: repoRoot,
@@ -698,14 +703,23 @@ async function runEngineAdminCommand(
 
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
+  let stderrBuffer = "";
   child.stdout.on("data", (chunk: Buffer | string) => {
     stdoutChunks.push(Buffer.from(chunk));
   });
   child.stderr.on("data", (chunk: Buffer | string) => {
     const buffer = Buffer.from(chunk);
     stderrChunks.push(buffer);
-    if (options?.inheritStderr) {
-      process.stderr.write(buffer);
+    if (options?.onStderrLine) {
+      stderrBuffer += buffer.toString("utf8");
+      const parts = stderrBuffer.split(/\r?\n/);
+      stderrBuffer = parts.pop() ?? "";
+      for (const part of parts) {
+        const trimmed = part.trim();
+        if (trimmed !== "") {
+          options.onStderrLine(trimmed);
+        }
+      }
     }
   });
 
@@ -716,6 +730,9 @@ async function runEngineAdminCommand(
 
   const stdout = Buffer.concat(stdoutChunks).toString("utf8");
   const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+  if (options?.onStderrLine && stderrBuffer.trim() !== "") {
+    options.onStderrLine(stderrBuffer.trim());
+  }
   if (exitCode !== 0) {
     throw new Error(
       stderr === ""

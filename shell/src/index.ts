@@ -520,10 +520,13 @@ async function handleShellInputLine(
     ui.setActiveSurface("profiles");
     ui.setArtifactView(null);
     ui.writeLine("auth: opening browser for Anthropic OAuth");
+    ui.writeLine("auth: waiting for Anthropic OAuth callback");
     const profiles = await loginAnthropicOAuth(config, {
       defaultModel: slashCommand.defaultModel,
       apiBase: slashCommand.apiBase,
       accountScope: slashCommand.accountScope,
+    }, {
+      onStatusLine: (line) => ui.writeLine(line),
     });
     ui.setProfileStatuses(profiles);
     ui.writeLine("auth: saved anthropic-main and made it the default profile");
