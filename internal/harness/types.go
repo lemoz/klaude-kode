@@ -41,6 +41,17 @@ type BenchmarkCaseResult struct {
 	Failure    *EvalFailureSummary `json:"failure"`
 }
 
+type BenchmarkCaseDiff struct {
+	ID               string  `json:"id"`
+	LeftStatus       string  `json:"left_status"`
+	RightStatus      string  `json:"right_status"`
+	LeftScore        float64 `json:"left_score"`
+	RightScore       float64 `json:"right_score"`
+	ScoreDelta       float64 `json:"score_delta"`
+	LeftFailureCode  string  `json:"left_failure_code"`
+	RightFailureCode string  `json:"right_failure_code"`
+}
+
 type EvalRun struct {
 	ID            string                `json:"id"`
 	Kind          string                `json:"kind"`
@@ -53,6 +64,21 @@ type EvalRun struct {
 	Score         float64               `json:"score"`
 	CaseResults   []BenchmarkCaseResult `json:"case_results"`
 	Failure       *EvalFailureSummary   `json:"failure"`
+}
+
+type EvalRunDiff struct {
+	LeftRunID        string              `json:"left_run_id"`
+	RightRunID       string              `json:"right_run_id"`
+	LeftKind         string              `json:"left_kind"`
+	RightKind        string              `json:"right_kind"`
+	LeftStatus       string              `json:"left_status"`
+	RightStatus      string              `json:"right_status"`
+	LeftScore        float64             `json:"left_score"`
+	RightScore       float64             `json:"right_score"`
+	ScoreDelta       float64             `json:"score_delta"`
+	LeftFailureCode  string              `json:"left_failure_code"`
+	RightFailureCode string              `json:"right_failure_code"`
+	CaseDiffs        []BenchmarkCaseDiff `json:"case_diffs"`
 }
 
 type EvalRunSummary struct {
