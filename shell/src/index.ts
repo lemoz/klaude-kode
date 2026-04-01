@@ -17,6 +17,7 @@ import {
   makeUpdateSessionSettingCommand,
   makeUserInputCommand,
   runReplayEval,
+  showRun,
   summarizeRuns,
   startEngineSession,
   validateCandidate,
@@ -195,6 +196,12 @@ async function runInteractiveLoop(
         if (slashCommand?.kind === "summarize_runs") {
           const summary = await summarizeRuns(config);
           renderRunSummary(ui, summary);
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "show_run") {
+          const run = await showRun(config, slashCommand.runID);
+          renderEvalRun(ui, run);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -514,6 +521,7 @@ function parseSlashCommand(
   | { kind: "profiles" }
   | { kind: "status" }
   | { kind: "summarize_runs" }
+  | { kind: "show_run"; runID: string }
   | { kind: "validate_candidate" }
   | { kind: "run_replay"; replayPath: string }
   | { kind: "export_replay"; outputPath: string }
@@ -536,6 +544,13 @@ function parseSlashCommand(
   }
   if (trimmed === "/summarize-runs") {
     return { kind: "summarize_runs" };
+  }
+  if (trimmed.startsWith("/show-run ")) {
+    const runID = trimmed.slice("/show-run ".length).trim();
+    if (runID === "") {
+      throw new Error("usage: /show-run <id>");
+    }
+    return { kind: "show_run", runID };
   }
   if (trimmed === "/validate-candidate") {
     return { kind: "validate_candidate" };
@@ -796,12 +811,31 @@ function renderReplayEval(
   ui: ReturnType<typeof createRenderer>,
   evalRun: EvalRun,
 ): void {
-  ui.writeLine("replay:");
+  renderEvalRun(ui, evalRun);
+}
+
+function renderEvalRun(
+  ui: ReturnType<typeof createRenderer>,
+  evalRun: EvalRun,
+): void {
+  const caseResults = evalRun.case_results ?? [];
+  ui.writeLine("run:");
   ui.writeLine(`- run: ${evalRun.id}`);
+  ui.writeLine(`  kind: ${evalRun.kind}`);
   ui.writeLine(`  status: ${evalRun.status}`);
   ui.writeLine(`  score: ${evalRun.score.toFixed(2)}`);
   ui.writeLine(`  candidate_root: ${evalRun.candidate.root}`);
-  ui.writeLine(`  replay_path: ${evalRun.replay_path}`);
+  if (evalRun.replay_path !== "") {
+    ui.writeLine(`  replay_path: ${evalRun.replay_path}`);
+  }
+  if (evalRun.benchmark) {
+    ui.writeLine(`  benchmark: ${evalRun.benchmark.name}`);
+    ui.writeLine(`  benchmark_path: ${evalRun.benchmark.path}`);
+    ui.writeLine(`  cases: ${evalRun.benchmark.case_count}`);
+  }
+  if (caseResults.length > 0) {
+    ui.writeLine(`  case_results: ${caseResults.length}`);
+  }
   if (evalRun.failure) {
     ui.writeLine(`  failure_code: ${evalRun.failure.code}`);
     ui.writeLine(`  failure_message: ${evalRun.failure.message}`);
@@ -860,6 +894,7 @@ function printHelp(): void {
     "  /profiles",
     "  /status",
     "  /summarize-runs",
+    "  /show-run <id>",
     "  /validate-candidate",
     "  /run-replay <path>",
     "  /export-replay <path>",

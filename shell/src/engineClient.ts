@@ -149,12 +149,27 @@ export interface EvalFailureSummary {
 
 export interface EvalRun {
   id: string;
+  kind: string;
   schema_version: string;
   created_at: string;
   candidate: CandidateBundle;
   replay_path: string;
+  benchmark: {
+    name: string;
+    description: string;
+    path: string;
+    case_count: number;
+  } | null;
   status: string;
   score: number;
+  case_results: Array<{
+    id: string;
+    replay_path: string;
+    weight: number;
+    status: string;
+    score: number;
+    failure: EvalFailureSummary | null;
+  }> | null;
   failure: EvalFailureSummary | null;
 }
 
@@ -438,6 +453,20 @@ export async function summarizeRuns(
     `-state-root=${config.stateRoot}`,
   ]);
   return JSON.parse(stdout) as EvalRunSummary;
+}
+
+export async function showRun(
+  config: Pick<ShellConfig, "stateRoot" | "cwd">,
+  runID: string,
+): Promise<EvalRun> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    "-show-run",
+    `-cwd=${config.cwd}`,
+    `-run-id=${runID}`,
+    `-state-root=${config.stateRoot}`,
+  ]);
+  return JSON.parse(stdout) as EvalRun;
 }
 
 export async function logoutProfile(
