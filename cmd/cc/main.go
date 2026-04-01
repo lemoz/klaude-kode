@@ -35,6 +35,7 @@ type config struct {
 	RunBenchmarkEval  bool
 	SummarizeRuns     bool
 	ShowRun           bool
+	DiffRuns          bool
 	Prompt            string
 	SessionID         string
 	ResumeSessionID   string
@@ -45,6 +46,8 @@ type config struct {
 	ReplayPath        string
 	BenchmarkPath     string
 	RunID             string
+	LeftRunID         string
+	RightRunID        string
 }
 
 type result struct {
@@ -140,6 +143,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return renderShowRun(cfg, stdout)
 	}
+	if cfg.DiffRuns {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-diff-runs does not support -format=events")
+		}
+		return renderDiffRuns(cfg, stdout)
+	}
 	if cfg.RunReplayEval {
 		if cfg.Format == outputFormatEvents {
 			return fmt.Errorf("-run-replay-eval does not support -format=events")
@@ -176,6 +185,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
 	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
 	showRunValue := fs.Bool("show-run", false, "show a persisted replay evaluation run and exit")
+	diffRunsValue := fs.Bool("diff-runs", false, "diff two persisted replay evaluation runs and exit")
 	runReplayEvalValue := fs.Bool("run-replay-eval", false, "run a replay evaluation for the current candidate root and exit")
 	runBenchmarkEvalValue := fs.Bool("run-benchmark-eval", false, "run a benchmark evaluation for the current candidate root and exit")
 	promptValue := fs.String("prompt", "bootstrap hello from cc", "prompt to submit to the session")
@@ -188,6 +198,8 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	replayPathValue := fs.String("replay-path", "", "path to a replay pack file for harness evaluation")
 	benchmarkPathValue := fs.String("benchmark-path", "", "path to a benchmark pack file for harness evaluation")
 	runIDValue := fs.String("run-id", "", "run identifier for -show-run")
+	leftRunIDValue := fs.String("left-run-id", "", "left run identifier for -diff-runs")
+	rightRunIDValue := fs.String("right-run-id", "", "right run identifier for -diff-runs")
 
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -209,6 +221,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ValidateCandidate: *validateCandidateValue,
 		SummarizeRuns:     *summarizeRunsValue,
 		ShowRun:           *showRunValue,
+		DiffRuns:          *diffRunsValue,
 		RunReplayEval:     *runReplayEvalValue,
 		RunBenchmarkEval:  *runBenchmarkEvalValue,
 		Prompt:            strings.TrimSpace(*promptValue),
@@ -221,6 +234,8 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ReplayPath:        strings.TrimSpace(*replayPathValue),
 		BenchmarkPath:     strings.TrimSpace(*benchmarkPathValue),
 		RunID:             strings.TrimSpace(*runIDValue),
+		LeftRunID:         strings.TrimSpace(*leftRunIDValue),
+		RightRunID:        strings.TrimSpace(*rightRunIDValue),
 	}, nil
 }
 
@@ -569,6 +584,28 @@ func renderShowRun(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderDiffRuns(cfg config, stdout io.Writer) error {
+	if cfg.LeftRunID == "" || cfg.RightRunID == "" {
+		return fmt.Errorf("left and right run ids are required for -diff-runs")
+	}
+
+	diff, err := harness.DiffPersistedEvalRuns(harness.DefaultArtifactRoot(cfg.CWD), cfg.LeftRunID, cfg.RightRunID)
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatJSON:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(diff)
+	case outputFormatText:
+		fallthrough
+	default:
+		return renderDiffRunsText(stdout, diff)
+	}
+}
+
 func renderResult(stdout io.Writer, format outputFormat, sessionResult result) error {
 	switch format {
 	case outputFormatEvents:
@@ -774,6 +811,28 @@ func renderBenchmarkEvalText(stdout io.Writer, run harness.EvalRun) error {
 		lines = append(lines, fmt.Sprintf("failure_code: %s", run.Failure.Code))
 		lines = append(lines, fmt.Sprintf("failure_message: %s", run.Failure.Message))
 		lines = append(lines, fmt.Sprintf("retryable: %t", run.Failure.Retryable))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderDiffRunsText(stdout io.Writer, diff harness.EvalRunDiff) error {
+	lines := []string{
+		"cc run diff",
+		fmt.Sprintf("left_run: %s", diff.LeftRunID),
+		fmt.Sprintf("right_run: %s", diff.RightRunID),
+		fmt.Sprintf("left_status: %s", diff.LeftStatus),
+		fmt.Sprintf("right_status: %s", diff.RightStatus),
+		fmt.Sprintf("left_score: %.2f", diff.LeftScore),
+		fmt.Sprintf("right_score: %.2f", diff.RightScore),
+		fmt.Sprintf("score_delta: %.2f", diff.ScoreDelta),
+	}
+	if diff.LeftFailureCode != "" || diff.RightFailureCode != "" {
+		lines = append(lines, fmt.Sprintf("left_failure_code: %s", diff.LeftFailureCode))
+		lines = append(lines, fmt.Sprintf("right_failure_code: %s", diff.RightFailureCode))
+	}
+	if len(diff.CaseDiffs) > 0 {
+		lines = append(lines, fmt.Sprintf("case_diffs: %d", len(diff.CaseDiffs)))
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err

@@ -434,6 +434,84 @@ func TestRunBenchmarkEvalText(t *testing.T) {
 	}
 }
 
+func TestRunDiffRunsText(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	artifactRoot := harness.DefaultArtifactRoot(candidateRoot)
+	left := harness.EvalRun{
+		ID:            "run_left",
+		Kind:          harness.EvalRunKindBenchmark,
+		SchemaVersion: contracts.SchemaVersionV1,
+		Candidate: harness.CandidateBundle{
+			Root: candidateRoot,
+		},
+		Status: harness.EvalRunStatusFailed,
+		Score:  0.5,
+		CaseResults: []harness.BenchmarkCaseResult{
+			{
+				ID:     "case_a",
+				Status: harness.EvalRunStatusFailed,
+				Score:  0,
+				Failure: &harness.EvalFailureSummary{
+					Code:      "replay_terminal_outcome",
+					Message:   "replay pack terminal outcome is task_failure",
+					Retryable: false,
+				},
+			},
+		},
+		Failure: &harness.EvalFailureSummary{
+			Code:      "benchmark_cases_failed",
+			Message:   "1 benchmark cases failed",
+			Retryable: false,
+		},
+	}
+	right := harness.EvalRun{
+		ID:            "run_right",
+		Kind:          harness.EvalRunKindBenchmark,
+		SchemaVersion: contracts.SchemaVersionV1,
+		Candidate: harness.CandidateBundle{
+			Root: candidateRoot,
+		},
+		Status: harness.EvalRunStatusCompleted,
+		Score:  1,
+		CaseResults: []harness.BenchmarkCaseResult{
+			{
+				ID:     "case_a",
+				Status: harness.EvalRunStatusCompleted,
+				Score:  1,
+			},
+		},
+	}
+
+	if _, err := harness.PersistEvalRun(artifactRoot, left); err != nil {
+		t.Fatalf("PersistEvalRun left returned error: %v", err)
+	}
+	if _, err := harness.PersistEvalRun(artifactRoot, right); err != nil {
+		t.Fatalf("PersistEvalRun right returned error: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-diff-runs",
+		"-cwd=" + candidateRoot,
+		"-left-run-id=" + left.ID,
+		"-right-run-id=" + right.ID,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("diff runs returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc run diff") {
+		t.Fatalf("expected run diff header, got %q", output)
+	}
+	if !strings.Contains(output, "score_delta: 0.50") {
+		t.Fatalf("expected score delta in output, got %q", output)
+	}
+	if !strings.Contains(output, "case_diffs: 1") {
+		t.Fatalf("expected case diff count in output, got %q", output)
+	}
+}
+
 func TestResumePersistedSession(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 
