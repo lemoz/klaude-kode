@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
+    "cleanup:smokes": "../scripts/cleanup-shell-smokes.sh",
     "dev": "tsx src/index.ts"
   },
   "dependencies": {

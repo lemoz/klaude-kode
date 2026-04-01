@@ -5,6 +5,17 @@
 The blueprint is only complete if implementation can be validated against
 scenario, failure, and performance gates.
 
+## 1.1 Test Hygiene
+
+Shell and tmux smoke tests must leave the environment clean.
+
+- automated shell session ids and tmux sessions use the `kk-smoke-` prefix
+- run `./scripts/cleanup-shell-smokes.sh` before and after shell/tmux smoke
+  batches
+- if a smoke command launches a long-lived process, add an `EXIT` trap that
+  calls the cleanup script
+- stale smoke terminals are a failed verification state, not a cosmetic issue
+
 ## 2. Scenario Coverage
 
 ### 2.1 Local Interactive REPL
@@ -203,4 +214,3 @@ A phase cannot ship unless:
 - benchmark targets pass or have signed waiver
 - failure-mode tests pass
 - replay/resume integrity tests pass
-

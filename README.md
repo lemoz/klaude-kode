@@ -77,6 +77,21 @@ Every implementation step is atomic and must end with:
 This repo should not accumulate multiple unfinished steps in one local-only
 change set.
 
+## Test Hygiene
+
+Shell and tmux smoke tests must not leave detached sessions or background
+processes behind.
+
+- reserve the `kk-smoke-` prefix for automated shell session ids and tmux
+  session names
+- run `./scripts/cleanup-shell-smokes.sh` before and after shell/tmux smoke
+  batches
+- use `cd shell && npm run cleanup:smokes` when you are already working from the
+  shell package
+- if a shell/tmux smoke command launches a long-lived process, wrap it with an
+  `EXIT` trap that calls the cleanup script
+- do not commit or push while stale smoke terminals are still running
+
 ## Quick Commands
 
 Go:
@@ -93,6 +108,7 @@ Shell:
 cd shell
 npm install
 npm run check
+npm run cleanup:smokes
 npm run dev
 ```
 

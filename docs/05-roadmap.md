@@ -37,6 +37,14 @@ Every step in every phase follows this order:
 If tooling is unavailable in the environment, the step is not complete until the
 missing verification is called out explicitly in the commit/push handoff.
 
+Shell/tmux verification steps add one more requirement:
+
+- clean stale smoke sessions before and after the verification batch with
+  `./scripts/cleanup-shell-smokes.sh`
+- reserve the `kk-smoke-` prefix for automated shell session ids and tmux
+  session names so cleanup stays targeted
+- do not commit or push with stale smoke terminals still running
+
 ## 3. Phase 0: Inventory and Contracts
 
 ### Deliverables
