@@ -1,12 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import process from "node:process";
+import React from "react";
+import { render } from "ink";
 
 import {
   makeApprovePermissionCommand,
   defaultShellConfig,
   diffRuns,
+  type EngineSession,
   makeCloseSessionCommand,
   makeDenyPermissionCommand,
   loginAnthropic,
@@ -36,31 +38,400 @@ import {
   type ShellConfig,
   type FrontierEntry,
 } from "./engineClient.js";
+import { InteractiveShell } from "./app.js";
 import { ShellPresentationModel } from "./presentation.js";
 
 async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
+  if (config.prompt !== "") {
+    await runPromptMode(config);
+    return;
+  }
+  await runInteractiveShell(config);
+}
+
+interface LineWriter {
+  writeLine(line: string): void;
+}
+
+interface ShellUIController extends LineWriter {
+  decisionVersion(): number;
+  currentState(): SessionStateSnapshot | null;
+  waitForDecision(afterVersion: number): Promise<void>;
+  currentPrompt(): string;
+  takePendingPermission(): PermissionEventPayload | undefined;
+}
+
+async function runPromptMode(config: ShellConfig): Promise<void> {
   const renderer = createRenderer(config.rawEvents);
   const session = await startEngineSession(config, (event) => {
     renderer.handleEvent(event);
   });
 
   try {
-    if (config.prompt !== "") {
-      await session.sendCommand(makeUserInputCommand(config.prompt));
-      await session.sendCommand(makeCloseSessionCommand("shell_prompt_complete"));
-      await session.closeInput();
-      await session.done;
-      return;
-    }
-
-    console.log("Klaude Kode shell");
-    console.log("Type /exit to close the session.");
-    await runInteractiveLoop(session, renderer, config);
+    await session.sendCommand(makeUserInputCommand(config.prompt));
+    await session.sendCommand(makeCloseSessionCommand("shell_prompt_complete"));
+    await session.closeInput();
     await session.done;
   } finally {
     await session.closeInput().catch(() => undefined);
   }
+}
+
+async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
+  const config = { ...initialConfig };
+  const model = new ShellPresentationModel(config.rawEvents);
+  const streamedTurns = new Set<string>();
+  let session: EngineSession | null = null;
+  let busy = true;
+  let closed = false;
+  let inputValue = "";
+  let lines: string[] = [];
+
+  const appendLine = (line: string) => {
+    lines = [...lines, line];
+  };
+
+  const ui: ShellUIController = {
+    decisionVersion(): number {
+      return model.decisionVersion();
+    },
+    currentState(): SessionStateSnapshot | null {
+      return model.currentState();
+    },
+    waitForDecision(afterVersion: number): Promise<void> {
+      return model.waitForDecision(afterVersion);
+    },
+    currentPrompt(): string {
+      return model.currentPrompt();
+    },
+    takePendingPermission(): PermissionEventPayload | undefined {
+      return model.takePendingPermission();
+    },
+    writeLine(line: string): void {
+      appendLine(line);
+      rerender();
+    },
+  };
+
+  let rerender = () => undefined;
+  const renderShell = () =>
+    React.createElement(InteractiveShell, {
+      lines,
+      promptLabel: ui.currentPrompt(),
+      inputValue,
+      busy,
+      closed,
+    });
+  const ink = render(renderShell());
+
+  rerender = () => {
+    ink.rerender(renderShell());
+  };
+
+  const stdin = process.stdin;
+  const previousRawMode = "isRaw" in stdin ? (stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw : undefined;
+  const canSetRawMode = typeof (stdin as NodeJS.ReadStream).setRawMode === "function";
+
+  const onInputData = (chunk: Buffer | string) => {
+    const text = chunk.toString();
+    void consumeInputChunk(text);
+  };
+
+  try {
+    if (canSetRawMode && stdin.isTTY) {
+      (stdin as NodeJS.ReadStream).setRawMode(true);
+    }
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    stdin.on("data", onInputData);
+
+    session = await startEngineSession(config, (event) => {
+      const previousState = model.currentState();
+      model.applyEvent(event);
+      const eventLines = renderInteractiveEvent(
+        config.rawEvents,
+        event,
+        previousState,
+        model.currentState(),
+        streamedTurns,
+      );
+      if (eventLines.length > 0) {
+        lines = [...lines, ...eventLines];
+      }
+      if (event.kind === "session_closed") {
+        closed = true;
+        busy = false;
+      }
+      rerender();
+    });
+    busy = false;
+    rerender();
+
+    void session.done.then(() => {
+      closed = true;
+      busy = false;
+      rerender();
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      appendLine(`error: ${message}`);
+      closed = true;
+      busy = false;
+      rerender();
+    });
+
+    await ink.waitUntilExit();
+  } finally {
+    stdin.off("data", onInputData);
+    if (canSetRawMode && stdin.isTTY) {
+      (stdin as NodeJS.ReadStream).setRawMode(previousRawMode ?? false);
+    }
+    await session?.closeInput().catch(() => undefined);
+    ink.unmount();
+  }
+
+  async function closeShell(reason: string): Promise<void> {
+    if (closed) {
+      return;
+    }
+    busy = true;
+    rerender();
+    if (!session) {
+      closed = true;
+      busy = false;
+      rerender();
+      return;
+    }
+    await session.sendCommand(makeCloseSessionCommand(reason));
+    await session.closeInput();
+  }
+
+  async function submitBufferedInput(): Promise<void> {
+    const line = inputValue.trimEnd();
+    inputValue = "";
+    rerender();
+    if (line === "") {
+      return;
+    }
+    if (line.trim() === "/exit") {
+      await closeShell("shell_exit");
+      return;
+    }
+    if (!session) {
+      return;
+    }
+    busy = true;
+    rerender();
+    try {
+      await handleShellInputLine(session, ui, config, line);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendLine(`error: ${message}`);
+    } finally {
+      if (!closed) {
+        busy = false;
+        rerender();
+      }
+    }
+  }
+
+  async function consumeInputChunk(text: string): Promise<void> {
+    for (const character of text) {
+      if (closed) {
+        return;
+      }
+      if (character === "\u0003") {
+        await closeShell("shell_exit");
+        return;
+      }
+      if (busy) {
+        continue;
+      }
+      if (character === "\r" || character === "\n") {
+        await submitBufferedInput();
+        continue;
+      }
+      if (character === "\u007f" || character === "\b") {
+        inputValue = inputValue.slice(0, -1);
+        rerender();
+        continue;
+      }
+      if (character === "\u001b") {
+        inputValue = "";
+        rerender();
+        continue;
+      }
+      if (character >= " " && character !== "\u007f") {
+        inputValue += character;
+        rerender();
+      }
+    }
+  }
+}
+
+async function handleShellInputLine(
+  session: EngineSession,
+  ui: ShellUIController,
+  config: ShellConfig,
+  rawLine: string,
+): Promise<void> {
+  const line = rawLine.trim();
+  if (line === "") {
+    return;
+  }
+  const slashCommand = parseSlashCommand(line);
+  if (slashCommand?.kind === "setting") {
+    const decisionVersion = ui.decisionVersion();
+    await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
+    await ui.waitForDecision(decisionVersion);
+    if (slashCommand.key === "profile_id") {
+      config.profileId = slashCommand.value;
+      const catalog = await listModels(config, slashCommand.value);
+      config.model = catalog.default_model;
+    } else {
+      config.model = slashCommand.value;
+    }
+    return;
+  }
+  if (slashCommand?.kind === "profiles") {
+    const profiles = await listProfiles(config);
+    renderProfiles(ui, profiles, config.profileId);
+    return;
+  }
+  if (slashCommand?.kind === "status") {
+    renderStatus(ui, config, ui.currentState());
+    return;
+  }
+  if (slashCommand?.kind === "summarize_runs") {
+    const summary = await summarizeRuns(config);
+    renderRunSummary(ui, summary);
+    return;
+  }
+  if (slashCommand?.kind === "show_run") {
+    const run = await showRun(config, slashCommand.runID);
+    renderEvalRun(ui, run);
+    return;
+  }
+  if (slashCommand?.kind === "list_frontier") {
+    const entries = await listFrontier(config, slashCommand.limit);
+    renderFrontier(ui, entries);
+    return;
+  }
+  if (slashCommand?.kind === "diff_runs") {
+    const diff = await diffRuns(config, slashCommand.leftRunID, slashCommand.rightRunID);
+    renderRunDiff(ui, diff);
+    return;
+  }
+  if (slashCommand?.kind === "validate_candidate") {
+    const validation = await validateCandidate(config);
+    renderCandidateValidation(ui, validation);
+    return;
+  }
+  if (slashCommand?.kind === "run_benchmark") {
+    const benchmarkPath = path.resolve(config.cwd, slashCommand.benchmarkPath);
+    const evalRun = await runBenchmarkEval(config, benchmarkPath);
+    renderEvalRun(ui, evalRun);
+    return;
+  }
+  if (slashCommand?.kind === "run_replay") {
+    const replayPath = path.resolve(config.cwd, slashCommand.replayPath);
+    const evalRun = await runReplayEval(config, replayPath);
+    renderReplayEval(ui, evalRun);
+    return;
+  }
+  if (slashCommand?.kind === "export_replay") {
+    const targetPath = path.resolve(config.cwd, slashCommand.outputPath);
+    const replayPack = await exportReplayPack(config);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, `${JSON.stringify(replayPack, null, 2)}\n`, "utf8");
+    ui.writeLine(`export: wrote replay pack to ${targetPath}`);
+    return;
+  }
+  if (slashCommand?.kind === "models") {
+    const catalog = await listModels(
+      config,
+      slashCommand.profileId || config.profileId,
+    );
+    renderModelCatalog(
+      ui,
+      catalog,
+      config.profileId,
+      config.model,
+    );
+    return;
+  }
+  if (slashCommand?.kind === "logout") {
+    const profiles = await logoutProfile(config, slashCommand.profileId);
+    ui.writeLine(`logout: cleared stored auth for ${slashCommand.profileId}`);
+    renderProfiles(ui, profiles, config.profileId);
+    return;
+  }
+  if (slashCommand?.kind === "login_openrouter") {
+    const profiles = await loginOpenRouter(config, {
+      credential: slashCommand.credential,
+      defaultModel: slashCommand.defaultModel,
+      apiBase: slashCommand.apiBase,
+    });
+    ui.writeLine("login: saved openrouter-main and set it as default");
+    renderProfiles(ui, profiles, "openrouter-main");
+    const decisionVersion = ui.decisionVersion();
+    await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "openrouter-main"));
+    await ui.waitForDecision(decisionVersion);
+    config.profileId = "openrouter-main";
+    config.model = slashCommand.defaultModel || (await listModels(config, "openrouter-main")).default_model;
+    return;
+  }
+  if (slashCommand?.kind === "login_anthropic") {
+    const profiles = await loginAnthropic(config, {
+      credential: slashCommand.credential,
+      defaultModel: slashCommand.defaultModel,
+      apiBase: slashCommand.apiBase,
+    });
+    ui.writeLine("login: saved anthropic-api and set it as default");
+    renderProfiles(ui, profiles, "anthropic-api");
+    const decisionVersion = ui.decisionVersion();
+    await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-api"));
+    await ui.waitForDecision(decisionVersion);
+    config.profileId = "anthropic-api";
+    config.model = slashCommand.defaultModel || (await listModels(config, "anthropic-api")).default_model;
+    return;
+  }
+  if (slashCommand?.kind === "login_anthropic_oauth") {
+    ui.writeLine("login: opening browser for Anthropic OAuth");
+    const profiles = await loginAnthropicOAuth(config, {
+      defaultModel: slashCommand.defaultModel,
+      apiBase: slashCommand.apiBase,
+      accountScope: slashCommand.accountScope,
+    });
+    ui.writeLine("login: saved anthropic-main and set it as default");
+    renderProfiles(ui, profiles, "anthropic-main");
+    const decisionVersion = ui.decisionVersion();
+    await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-main"));
+    await ui.waitForDecision(decisionVersion);
+    config.profileId = "anthropic-main";
+    config.model = slashCommand.defaultModel || (await listModels(config, "anthropic-main")).default_model;
+    return;
+  }
+
+  const pendingPermission = ui.takePendingPermission();
+  if (pendingPermission) {
+    const decisionVersion = ui.decisionVersion();
+    if (looksApproved(line)) {
+      await session.sendCommand(
+        makeApprovePermissionCommand(pendingPermission.request_id),
+      );
+    } else {
+      await session.sendCommand(
+        makeDenyPermissionCommand(pendingPermission.request_id),
+      );
+    }
+    await ui.waitForDecision(decisionVersion);
+    return;
+  }
+
+  const decisionVersion = ui.decisionVersion();
+  await session.sendCommand(makeUserInputCommand(line, { askForPermission: true }));
+  await ui.waitForDecision(decisionVersion);
 }
 
 function parseArgs(args: string[]) {
@@ -143,219 +514,6 @@ function parseArgs(args: string[]) {
   }
 
   return config;
-}
-
-async function runInteractiveLoop(
-  session: Awaited<ReturnType<typeof startEngineSession>>,
-  ui: ReturnType<typeof createRenderer>,
-  config: ShellConfig,
-): Promise<void> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: process.stdin.isTTY && process.stdout.isTTY,
-  });
-
-  try {
-    ui.showPrompt(ui.currentPrompt());
-    let closedByUser = false;
-
-    for await (const rawLine of rl) {
-      try {
-        const line = rawLine.trim();
-        if (line === "") {
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (line === "/exit") {
-          await session.sendCommand(makeCloseSessionCommand("shell_exit"));
-          await session.closeInput();
-          closedByUser = true;
-          break;
-        }
-        const slashCommand = parseSlashCommand(line);
-        if (slashCommand?.kind === "setting") {
-          const decisionVersion = ui.decisionVersion();
-          await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
-          await ui.waitForDecision(decisionVersion);
-          if (slashCommand.key === "profile_id") {
-            config.profileId = slashCommand.value;
-            const catalog = await listModels(config, slashCommand.value);
-            config.model = catalog.default_model;
-          } else {
-            config.model = slashCommand.value;
-          }
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "profiles") {
-          const profiles = await listProfiles(config);
-          renderProfiles(ui, profiles, config.profileId);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "status") {
-          renderStatus(ui, config, ui.currentState());
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "summarize_runs") {
-          const summary = await summarizeRuns(config);
-          renderRunSummary(ui, summary);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "show_run") {
-          const run = await showRun(config, slashCommand.runID);
-          renderEvalRun(ui, run);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "list_frontier") {
-          const entries = await listFrontier(config, slashCommand.limit);
-          renderFrontier(ui, entries);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "diff_runs") {
-          const diff = await diffRuns(config, slashCommand.leftRunID, slashCommand.rightRunID);
-          renderRunDiff(ui, diff);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "validate_candidate") {
-          const validation = await validateCandidate(config);
-          renderCandidateValidation(ui, validation);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "run_benchmark") {
-          const benchmarkPath = path.resolve(config.cwd, slashCommand.benchmarkPath);
-          const evalRun = await runBenchmarkEval(config, benchmarkPath);
-          renderEvalRun(ui, evalRun);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "run_replay") {
-          const replayPath = path.resolve(config.cwd, slashCommand.replayPath);
-          const evalRun = await runReplayEval(config, replayPath);
-          renderReplayEval(ui, evalRun);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "export_replay") {
-          const targetPath = path.resolve(config.cwd, slashCommand.outputPath);
-          const replayPack = await exportReplayPack(config);
-          await mkdir(path.dirname(targetPath), { recursive: true });
-          await writeFile(targetPath, `${JSON.stringify(replayPack, null, 2)}\n`, "utf8");
-          ui.writeLine(`export: wrote replay pack to ${targetPath}`);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "models") {
-          const catalog = await listModels(
-            config,
-            slashCommand.profileId || config.profileId,
-          );
-          renderModelCatalog(
-            ui,
-            catalog,
-            config.profileId,
-            config.model,
-          );
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "logout") {
-          const profiles = await logoutProfile(config, slashCommand.profileId);
-          ui.writeLine(`logout: cleared stored auth for ${slashCommand.profileId}`);
-          renderProfiles(ui, profiles, config.profileId);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "login_openrouter") {
-          const profiles = await loginOpenRouter(config, {
-            credential: slashCommand.credential,
-            defaultModel: slashCommand.defaultModel,
-            apiBase: slashCommand.apiBase,
-          });
-          ui.writeLine("login: saved openrouter-main and set it as default");
-          renderProfiles(ui, profiles, "openrouter-main");
-          const decisionVersion = ui.decisionVersion();
-          await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "openrouter-main"));
-          await ui.waitForDecision(decisionVersion);
-          config.profileId = "openrouter-main";
-          config.model = slashCommand.defaultModel || (await listModels(config, "openrouter-main")).default_model;
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "login_anthropic") {
-          const profiles = await loginAnthropic(config, {
-            credential: slashCommand.credential,
-            defaultModel: slashCommand.defaultModel,
-            apiBase: slashCommand.apiBase,
-          });
-          ui.writeLine("login: saved anthropic-api and set it as default");
-          renderProfiles(ui, profiles, "anthropic-api");
-          const decisionVersion = ui.decisionVersion();
-          await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-api"));
-          await ui.waitForDecision(decisionVersion);
-          config.profileId = "anthropic-api";
-          config.model = slashCommand.defaultModel || (await listModels(config, "anthropic-api")).default_model;
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        if (slashCommand?.kind === "login_anthropic_oauth") {
-          ui.writeLine("login: opening browser for Anthropic OAuth");
-          const profiles = await loginAnthropicOAuth(config, {
-            defaultModel: slashCommand.defaultModel,
-            apiBase: slashCommand.apiBase,
-            accountScope: slashCommand.accountScope,
-          });
-          ui.writeLine("login: saved anthropic-main and set it as default");
-          renderProfiles(ui, profiles, "anthropic-main");
-          const decisionVersion = ui.decisionVersion();
-          await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-main"));
-          await ui.waitForDecision(decisionVersion);
-          config.profileId = "anthropic-main";
-          config.model = slashCommand.defaultModel || (await listModels(config, "anthropic-main")).default_model;
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        const pendingPermission = ui.takePendingPermission();
-        if (pendingPermission) {
-          const decisionVersion = ui.decisionVersion();
-          if (looksApproved(line)) {
-            await session.sendCommand(
-              makeApprovePermissionCommand(pendingPermission.request_id),
-            );
-          } else {
-            await session.sendCommand(
-              makeDenyPermissionCommand(pendingPermission.request_id),
-            );
-          }
-          await ui.waitForDecision(decisionVersion);
-          ui.showPrompt(ui.currentPrompt());
-          continue;
-        }
-        const decisionVersion = ui.decisionVersion();
-        await session.sendCommand(makeUserInputCommand(line, { askForPermission: true }));
-        await ui.waitForDecision(decisionVersion);
-        ui.showPrompt(ui.currentPrompt());
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ui.writeLine(`error: ${message}`);
-        ui.showPrompt(ui.currentPrompt());
-      }
-    }
-
-    if (!closedByUser) {
-      await session.sendCommand(makeCloseSessionCommand("shell_eof"));
-      await session.closeInput();
-    }
-  } finally {
-    rl.close();
-  }
 }
 
 function createRenderer(rawEvents: boolean) {
@@ -442,6 +600,60 @@ function createRenderer(rawEvents: boolean) {
       print(line);
     },
   };
+}
+
+function renderInteractiveEvent(
+  rawEvents: boolean,
+  event: SessionEvent,
+  previousState: SessionStateSnapshot | null,
+  currentState: SessionStateSnapshot | null,
+  streamedTurns: Set<string>,
+): string[] {
+  if (rawEvents) {
+    return [JSON.stringify(event)];
+  }
+
+  const lines: string[] = [];
+  if (!previousState && currentState) {
+    lines.push(`session: ${event.session_id}`);
+    lines.push(`mode: ${currentState.mode}`);
+    lines.push(`model: ${currentState.model}`);
+  } else if (
+    event.kind === "session_state" &&
+    previousState &&
+    currentState &&
+    currentState.status === "active" &&
+    (currentState.model !== previousState.model ||
+      currentState.profile_id !== previousState.profile_id)
+  ) {
+    lines.push(`session: model=${currentState.model} profile=${currentState.profile_id}`);
+  }
+
+  if (event.kind === "assistant_delta") {
+    if (event.payload.turn_id !== "") {
+      streamedTurns.add(event.payload.turn_id);
+    }
+    const rendered = renderEvent(event);
+    if (rendered !== "") {
+      lines.push(rendered);
+    }
+    return lines;
+  }
+
+  if (
+    event.kind === "assistant_message" &&
+    event.payload.turn_id !== "" &&
+    streamedTurns.has(event.payload.turn_id)
+  ) {
+    streamedTurns.delete(event.payload.turn_id);
+  } else {
+    const rendered = renderEvent(event);
+    if (rendered !== "") {
+      lines.push(rendered);
+    }
+  }
+
+  return lines;
 }
 
 function renderEvent(event: SessionEvent): string {
@@ -715,7 +927,7 @@ function parseLoginCommand(
 }
 
 function renderProfiles(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   profiles: ProfileStatus[],
   activeProfileID: string,
 ): void {
@@ -745,7 +957,7 @@ function renderProfiles(
 }
 
 function renderStatus(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   config: ShellConfig,
   state: SessionStateSnapshot | null,
 ): void {
@@ -768,7 +980,7 @@ function renderStatus(
 }
 
 function renderModelCatalog(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   catalog: Awaited<ReturnType<typeof listModels>>,
   activeProfileID: string,
   activeModel: string,
@@ -792,7 +1004,7 @@ function renderModelCatalog(
 }
 
 function renderCandidateValidation(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   validation: CandidateValidationResult,
 ): void {
   const issues = validation.issues ?? [];
@@ -809,7 +1021,7 @@ function renderCandidateValidation(
 }
 
 function renderRunSummary(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   summary: EvalRunSummary,
 ): void {
   ui.writeLine("runs:");
@@ -831,14 +1043,14 @@ function renderRunSummary(
 }
 
 function renderReplayEval(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   evalRun: EvalRun,
 ): void {
   renderEvalRun(ui, evalRun);
 }
 
 function renderEvalRun(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   evalRun: EvalRun,
 ): void {
   const caseResults = evalRun.case_results ?? [];
@@ -867,7 +1079,7 @@ function renderEvalRun(
 }
 
 function renderFrontier(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   entries: FrontierEntry[],
 ): void {
   ui.writeLine("frontier:");
@@ -886,7 +1098,7 @@ function renderFrontier(
 }
 
 function renderRunDiff(
-  ui: ReturnType<typeof createRenderer>,
+  ui: LineWriter,
   diff: EvalRunDiff,
 ): void {
   ui.writeLine("diff:");

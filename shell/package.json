@@ -7,8 +7,13 @@
     "check": "tsc --noEmit",
     "dev": "tsx src/index.ts"
   },
+  "dependencies": {
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  },
   "devDependencies": {
     "@types/node": "^22.15.18",
+    "@types/react": "^18.3.12",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3"
   }
