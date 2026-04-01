@@ -112,6 +112,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   let lines: string[] = [];
   let activeSurface: ShellSurface = "conversation";
   let artifactView: ArtifactView | null = null;
+  let exiting = false;
 
   const appendLine = (line: string) => {
     if (!shouldKeepOperationLine(line)) {
@@ -180,8 +181,18 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       closed,
     });
   const ink = render(renderShell());
+  const exitShell = () => {
+    if (exiting) {
+      return;
+    }
+    exiting = true;
+    ink.unmount();
+  };
 
   rerender = () => {
+    if (exiting) {
+      return;
+    }
     ink.rerender(renderShell());
   };
 
@@ -218,6 +229,8 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       if (event.kind === "session_closed") {
         closed = true;
         busy = false;
+        exitShell();
+        return;
       }
       rerender();
     });
@@ -232,13 +245,13 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
     void session.done.then(() => {
       closed = true;
       busy = false;
-      rerender();
+      exitShell();
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       appendLine(`error: ${message}`);
       closed = true;
       busy = false;
-      rerender();
+      exitShell();
     });
 
     await ink.waitUntilExit();
