@@ -36,6 +36,7 @@ import {
   type ShellConfig,
   type FrontierEntry,
 } from "./engineClient.js";
+import { ShellPresentationModel } from "./presentation.js";
 
 async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
@@ -359,49 +360,37 @@ async function runInteractiveLoop(
 
 function createRenderer(rawEvents: boolean) {
   let headerPrinted = false;
-  let currentState: SessionStateSnapshot | null = null;
-  const pendingPermissions: PermissionEventPayload[] = [];
+  const model = new ShellPresentationModel(rawEvents);
   const streamedTurns = new Set<string>();
-  let decisionSignals = 0;
-  let notifyDecision: (() => void) | null = null;
 
   const print = (line: string) => {
     console.log(line);
   };
 
-  const signalDecision = () => {
-    decisionSignals += 1;
-    const waiter = notifyDecision;
-    notifyDecision = null;
-    waiter?.();
-  };
-
   return {
     handleEvent(event: SessionEvent): void {
+      const previousState = model.currentState();
+      model.applyEvent(event);
       if (rawEvents) {
         print(JSON.stringify(event));
         return;
       }
 
-      const state = event.payload.state;
+      const state = model.currentState();
       if (!headerPrinted && state) {
         print(`session: ${event.session_id}`);
         print(`mode: ${state.mode}`);
         print(`model: ${state.model}`);
         headerPrinted = true;
-        currentState = state;
       } else if (
         event.kind === "session_state" &&
         state &&
-        currentState &&
+        previousState &&
         state.status === "active" &&
-        (state.model !== currentState.model ||
-          state.profile_id !== currentState.profile_id)
+        (state.model !== previousState.model ||
+          state.profile_id !== previousState.profile_id)
       ) {
         print(`session: model=${state.model} profile=${state.profile_id}`);
-        currentState = state;
-      } else if (state) {
-        currentState = state;
       }
 
       if (event.kind === "assistant_delta") {
@@ -428,42 +417,21 @@ function createRenderer(rawEvents: boolean) {
         }
       }
 
-      if (event.kind === "permission_requested" && event.payload.permission) {
-        pendingPermissions.push(event.payload.permission);
-      }
-      if (
-        event.kind === "permission_requested" ||
-        event.kind === "session_state" ||
-        event.kind === "assistant_message" ||
-        event.kind === "failure" ||
-        event.kind === "session_closed"
-      ) {
-        signalDecision();
-      }
     },
     decisionVersion(): number {
-      return decisionSignals;
+      return model.decisionVersion();
     },
     currentState(): SessionStateSnapshot | null {
-      return currentState;
+      return model.currentState();
     },
     waitForDecision(afterVersion: number): Promise<void> {
-      if (decisionSignals > afterVersion) {
-        return Promise.resolve();
-      }
-      return new Promise((resolve) => {
-        notifyDecision = resolve;
-      });
+      return model.waitForDecision(afterVersion);
     },
     currentPrompt(): string {
-      const pending = pendingPermissions[0];
-      if (pending) {
-        return `${pending.prompt} [y/N] `;
-      }
-      return "klaude> ";
+      return model.currentPrompt();
     },
     takePendingPermission(): PermissionEventPayload | undefined {
-      return pendingPermissions.shift();
+      return model.takePendingPermission();
     },
     showPrompt(prompt: string): void {
       if (!rawEvents && process.stdout.isTTY) {
