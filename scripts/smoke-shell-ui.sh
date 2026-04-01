@@ -35,22 +35,34 @@ capture_pane() {
   tmux capture-pane -pt "${session_name}" 2>/dev/null || true
 }
 
+wait_for_capture_contains() {
+  local needle="$1"
+  local capture=""
+  local attempt
+  for attempt in $(seq 1 30); do
+    capture="$(capture_pane)"
+    if printf "%s" "${capture}" | rg -F -q "${needle}"; then
+      printf "%s" "${capture}"
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf "%s" "${capture}"
+  return 1
+}
+
 trap cleanup EXIT
 cleanup
 
 tmux new-session -d -s "${session_name}" \
   "cd '${shell_dir}' && npm run dev -- --session-id='${session_name}' --state-root='${state_root}' --cwd='${repo_root}'"
 
-sleep 2
-
-idle_capture="$(capture_pane)"
+idle_capture="$(wait_for_capture_contains "Klaude Kode Terminal")"
 assert_contains "${idle_capture}" "Klaude Kode Terminal"
 assert_not_contains "${idle_capture}" "Operations"
 
 tmux send-keys -t "${session_name}" "/help" Enter
-sleep 1
-
-help_capture="$(capture_pane)"
+help_capture="$(wait_for_capture_contains "Klaude Kode Help")"
 assert_contains "${help_capture}" "Operations"
 assert_contains "${help_capture}" "Klaude Kode Help"
 

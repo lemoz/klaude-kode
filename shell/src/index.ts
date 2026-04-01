@@ -114,6 +114,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   let activeSurface: ShellSurface = "conversation";
   let artifactView: ArtifactView | null = null;
   let exiting = false;
+  let inputQueue = Promise.resolve();
 
   try {
     const [profiles, catalog] = await Promise.all([
@@ -191,6 +192,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       promptState: renderPromptState(),
       inputValue,
       closed,
+      onData: queueInput,
     });
   const ink = render(renderShell());
   const exitShell = () => {
@@ -208,23 +210,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
     ink.rerender(renderShell());
   };
 
-  const stdin = process.stdin;
-  const previousRawMode = "isRaw" in stdin ? (stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw : undefined;
-  const canSetRawMode = typeof (stdin as NodeJS.ReadStream).setRawMode === "function";
-
-  const onInputData = (chunk: Buffer | string) => {
-    const text = chunk.toString();
-    void consumeInputChunk(text);
-  };
-
   try {
-    if (canSetRawMode && stdin.isTTY) {
-      (stdin as NodeJS.ReadStream).setRawMode(true);
-    }
-    stdin.resume();
-    stdin.setEncoding("utf8");
-    stdin.on("data", onInputData);
-
     session = await startEngineSession(config, (event) => {
       const previousState = model.currentState();
       model.applyEvent(event);
@@ -263,12 +249,17 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
 
     await ink.waitUntilExit();
   } finally {
-    stdin.off("data", onInputData);
-    if (canSetRawMode && stdin.isTTY) {
-      (stdin as NodeJS.ReadStream).setRawMode(previousRawMode ?? false);
-    }
     await session?.closeInput().catch(() => undefined);
     ink.unmount();
+  }
+
+  function queueInput(text: string): void {
+    inputQueue = inputQueue.then(() => consumeInputChunk(text)).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      appendLine(`error: ${message}`);
+      busy = false;
+      rerender();
+    });
   }
 
   async function closeShell(reason: string): Promise<void> {
@@ -322,7 +313,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
 
   async function consumeInputChunk(text: string): Promise<void> {
     for (const character of text) {
-      if (closed) {
+      if (closed || exiting) {
         return;
       }
       if (character === "\u0003") {

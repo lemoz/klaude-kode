@@ -26,35 +26,45 @@ capture_pane() {
   tmux capture-pane -pt "${session_name}" 2>/dev/null || true
 }
 
+wait_for_capture_contains() {
+  local needle="$1"
+  local capture=""
+  local attempt
+  for attempt in $(seq 1 30); do
+    capture="$(capture_pane)"
+    if printf "%s" "${capture}" | rg -F -q "${needle}"; then
+      printf "%s" "${capture}"
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf "%s" "${capture}"
+  return 1
+}
+
 trap cleanup EXIT
 cleanup
 
 tmux new-session -d -s "${session_name}" \
   "cd '${shell_dir}' && npm run dev -- --session-id='${session_name}' --state-root='${state_root}' --cwd='${repo_root}'"
 
-sleep 2
-
 tmux send-keys -t "${session_name}" "tool:pwd" Enter
-sleep 2
 
-request_capture="$(capture_pane)"
+request_capture="$(wait_for_capture_contains "Pending Permission")"
 assert_contains "${request_capture}" "Pending Permission"
 assert_contains "${request_capture}" "decision>"
 assert_contains "${request_capture}" "Allow pwd to access workspace?"
 
 tmux send-keys -t "${session_name}" "y" Enter
-sleep 2
 
-approve_capture="$(capture_pane)"
+approve_capture="$(wait_for_capture_contains "permission: allow_once")"
 assert_contains "${approve_capture}" "permission: allow_once"
 assert_contains "${approve_capture}" "tool:pwd pwd completed output=/Users/cdossman/klaude-kode"
 
 tmux send-keys -t "${session_name}" "tool:pwd" Enter
-sleep 2
 tmux send-keys -t "${session_name}" "n" Enter
-sleep 2
 
-deny_capture="$(capture_pane)"
+deny_capture="$(wait_for_capture_contains "permission: deny")"
 assert_contains "${deny_capture}" "permission: deny"
 assert_contains "${deny_capture}" "failure: permission/permission_denied permission denied for tool pwd"
 

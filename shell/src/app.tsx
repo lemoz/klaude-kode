@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { Box, Text, useApp } from "ink";
+import React, { useEffect, useRef } from "react";
+import { Box, Text, useApp, useStdin } from "ink";
 import type { TranscriptTurn } from "./presentation.js";
 import type { PermissionEventPayload } from "./engineClient.js";
 
@@ -62,17 +62,45 @@ export interface InteractiveShellProps {
   promptState: InteractivePromptState;
   inputValue: string;
   closed: boolean;
+  onData: (input: string) => void;
 }
 
 export function InteractiveShell(props: InteractiveShellProps) {
   const { exit } = useApp();
+  const { stdin, setRawMode, isRawModeSupported } = useStdin();
   const visibleOperationLines = props.lines.filter((line) => line.trim() !== "");
+  const onDataRef = useRef(props.onData);
+
+  onDataRef.current = props.onData;
 
   useEffect(() => {
     if (props.closed) {
       exit();
     }
   }, [exit, props.closed]);
+
+  useEffect(() => {
+    if (props.closed) {
+      return;
+    }
+    if (isRawModeSupported) {
+      setRawMode(true);
+    }
+
+    const handleData = (chunk: Buffer | string) => {
+      onDataRef.current(chunk.toString());
+    };
+
+    stdin.resume();
+    stdin.on("data", handleData);
+
+    return () => {
+      stdin.off("data", handleData);
+      if (isRawModeSupported) {
+        setRawMode(false);
+      }
+    };
+  }, [stdin, setRawMode, isRawModeSupported, props.closed]);
 
   return (
     <Box flexDirection="column">
