@@ -416,7 +416,7 @@ async function handleShellInputLine(
     const replayPack = await exportReplayPack(config);
     await mkdir(path.dirname(targetPath), { recursive: true });
     await writeFile(targetPath, `${JSON.stringify(replayPack, null, 2)}\n`, "utf8");
-    ui.writeLine(`export: wrote replay pack to ${targetPath}`);
+    ui.writeLine(`replay: wrote pack to ${targetPath}`);
     return;
   }
   if (slashCommand?.kind === "models") {
@@ -437,7 +437,7 @@ async function handleShellInputLine(
     ui.setActiveSurface("profiles");
     const profiles = await logoutProfile(config, slashCommand.profileId);
     ui.setProfileStatuses(profiles);
-    ui.writeLine(`logout: cleared stored auth for ${slashCommand.profileId}`);
+    ui.writeLine(`auth: cleared stored credentials for ${slashCommand.profileId}`);
     renderProfiles(ui, profiles, config.profileId);
     return;
   }
@@ -449,7 +449,7 @@ async function handleShellInputLine(
       apiBase: slashCommand.apiBase,
     });
     ui.setProfileStatuses(profiles);
-    ui.writeLine("login: saved openrouter-main and set it as default");
+    ui.writeLine("auth: saved openrouter-main and made it the default profile");
     renderProfiles(ui, profiles, "openrouter-main");
     const decisionVersion = ui.decisionVersion();
     await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "openrouter-main"));
@@ -466,7 +466,7 @@ async function handleShellInputLine(
       apiBase: slashCommand.apiBase,
     });
     ui.setProfileStatuses(profiles);
-    ui.writeLine("login: saved anthropic-api and set it as default");
+    ui.writeLine("auth: saved anthropic-api and made it the default profile");
     renderProfiles(ui, profiles, "anthropic-api");
     const decisionVersion = ui.decisionVersion();
     await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-api"));
@@ -477,14 +477,14 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "login_anthropic_oauth") {
     ui.setActiveSurface("profiles");
-    ui.writeLine("login: opening browser for Anthropic OAuth");
+    ui.writeLine("auth: opening browser for Anthropic OAuth");
     const profiles = await loginAnthropicOAuth(config, {
       defaultModel: slashCommand.defaultModel,
       apiBase: slashCommand.apiBase,
       accountScope: slashCommand.accountScope,
     });
     ui.setProfileStatuses(profiles);
-    ui.writeLine("login: saved anthropic-main and set it as default");
+    ui.writeLine("auth: saved anthropic-main and made it the default profile");
     renderProfiles(ui, profiles, "anthropic-main");
     const decisionVersion = ui.decisionVersion();
     await session.sendCommand(makeUpdateSessionSettingCommand("profile_id", "anthropic-main"));
@@ -1115,9 +1115,9 @@ function renderProfiles(
   profiles: ProfileStatus[],
   activeProfileID: string,
 ): void {
-  ui.writeLine("profiles:");
+  ui.writeLine("Profiles");
   for (const entry of profiles) {
-    const currentMarker = entry.profile.id === activeProfileID ? " (current)" : "";
+    const currentMarker = entry.profile.id === activeProfileID ? " (active)" : "";
     ui.writeLine(
       `- ${entry.profile.id}${currentMarker} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid} auth=${entry.auth.state}`,
     );
@@ -1141,7 +1141,7 @@ function renderProfiles(
 }
 
 function renderHelp(ui: LineWriter): void {
-  ui.writeLine("help:");
+  ui.writeLine("Klaude Kode Help");
   ui.writeLine("- prompts: type a message and press Enter");
   ui.writeLine("- exit: /exit");
   ui.writeLine("- auth: /login anthropic oauth | /login anthropic <env-var> | /login openrouter <env-var>");
@@ -1158,7 +1158,7 @@ function renderStatus(
   config: ShellConfig,
   state: SessionStateSnapshot | null,
 ): void {
-  ui.writeLine("status:");
+  ui.writeLine("Session");
   ui.writeLine(`- session: ${config.resumeSessionId || config.sessionId}`);
   if (!state) {
     ui.writeLine("  state: unavailable");
@@ -1182,7 +1182,7 @@ function renderModelCatalog(
   activeProfileID: string,
   activeModel: string,
 ): void {
-  ui.writeLine("models:");
+  ui.writeLine("Model Catalog");
   ui.writeLine(`- profile: ${catalog.profile_id}`);
   ui.writeLine(`  default_model: ${catalog.default_model}`);
   if (catalog.models.length > 0) {
@@ -1205,7 +1205,7 @@ function renderCandidateValidation(
   validation: CandidateValidationResult,
 ): void {
   const issues = validation.issues ?? [];
-  ui.writeLine("candidate:");
+  ui.writeLine("Candidate Check");
   ui.writeLine(`- valid: ${validation.valid}`);
   ui.writeLine(`  root: ${validation.candidate.root}`);
   ui.writeLine(`  engine_version: ${validation.candidate.engine_version}`);
@@ -1221,7 +1221,7 @@ function renderRunSummary(
   ui: LineWriter,
   summary: EvalRunSummary,
 ): void {
-  ui.writeLine("runs:");
+  ui.writeLine("Run Summary");
   ui.writeLine(`- artifact_root: ${summary.artifact_root}`);
   ui.writeLine(`  total_runs: ${summary.total_runs}`);
   ui.writeLine(`  completed: ${summary.completed}`);
@@ -1251,7 +1251,7 @@ function renderEvalRun(
   evalRun: EvalRun,
 ): void {
   const caseResults = evalRun.case_results ?? [];
-  ui.writeLine("run:");
+  ui.writeLine("Run Detail");
   ui.writeLine(`- run: ${evalRun.id}`);
   ui.writeLine(`  kind: ${evalRun.kind}`);
   ui.writeLine(`  status: ${evalRun.status}`);
@@ -1279,7 +1279,7 @@ function renderFrontier(
   ui: LineWriter,
   entries: FrontierEntry[],
 ): void {
-  ui.writeLine("frontier:");
+  ui.writeLine("Frontier");
   ui.writeLine(`- entries: ${entries.length}`);
   for (const entry of entries) {
     ui.writeLine(
@@ -1298,7 +1298,7 @@ function renderRunDiff(
   ui: LineWriter,
   diff: EvalRunDiff,
 ): void {
-  ui.writeLine("diff:");
+  ui.writeLine("Run Diff");
   ui.writeLine(`- left_run: ${diff.left_run_id}`);
   ui.writeLine(`  right_run: ${diff.right_run_id}`);
   ui.writeLine(`  left_status: ${diff.left_status}`);

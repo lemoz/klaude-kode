@@ -63,7 +63,7 @@ export function InteractiveShell(props: InteractiveShellProps) {
       </Box>
       <Box marginTop={1}>
         <Box flexDirection="column">
-          <Text dimColor>Type /help for commands. Type /exit to close the session.</Text>
+          <Text dimColor>Klaude Kode commands live under /help. Use /exit to close the session.</Text>
           {props.hints.map((hint, index) => (
             <Text key={`${index}:${hint}`} dimColor>
               {hint}
