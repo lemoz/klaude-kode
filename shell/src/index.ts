@@ -38,7 +38,7 @@ import {
   type ShellConfig,
   type FrontierEntry,
 } from "./engineClient.js";
-import { InteractiveShell } from "./app.js";
+import { InteractiveShell, type InteractiveShellHeader } from "./app.js";
 import { ShellPresentationModel } from "./presentation.js";
 
 async function main(): Promise<void> {
@@ -60,6 +60,7 @@ interface ShellUIController extends LineWriter {
   waitForDecision(afterVersion: number): Promise<void>;
   currentPrompt(): string;
   takePendingPermission(): PermissionEventPayload | undefined;
+  setProfileStatuses(profiles: ProfileStatus[]): void;
 }
 
 async function runPromptMode(config: ShellConfig): Promise<void> {
@@ -82,6 +83,7 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   const config = { ...initialConfig };
   const model = new ShellPresentationModel(config.rawEvents);
   const streamedTurns = new Set<string>();
+  let profileStatuses: ProfileStatus[] = [];
   let session: EngineSession | null = null;
   let busy = true;
   let closed = false;
@@ -108,6 +110,10 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
     takePendingPermission(): PermissionEventPayload | undefined {
       return model.takePendingPermission();
     },
+    setProfileStatuses(profiles: ProfileStatus[]): void {
+      profileStatuses = profiles;
+      rerender();
+    },
     writeLine(line: string): void {
       appendLine(line);
       rerender();
@@ -115,8 +121,11 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
   };
 
   let rerender = () => undefined;
+  const renderHeader = (): InteractiveShellHeader =>
+    buildInteractiveHeader(config, model.currentState(), profileStatuses);
   const renderShell = () =>
     React.createElement(InteractiveShell, {
+      header: renderHeader(),
       lines,
       promptLabel: ui.currentPrompt(),
       inputValue,
@@ -165,6 +174,11 @@ async function runInteractiveShell(initialConfig: ShellConfig): Promise<void> {
       }
       rerender();
     });
+    try {
+      profileStatuses = await listProfiles(config);
+    } catch {
+      profileStatuses = [];
+    }
     busy = false;
     rerender();
 
@@ -288,6 +302,7 @@ async function handleShellInputLine(
       config.profileId = slashCommand.value;
       const catalog = await listModels(config, slashCommand.value);
       config.model = catalog.default_model;
+      ui.setProfileStatuses(await listProfiles(config));
     } else {
       config.model = slashCommand.value;
     }
@@ -295,6 +310,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "profiles") {
     const profiles = await listProfiles(config);
+    ui.setProfileStatuses(profiles);
     renderProfiles(ui, profiles, config.profileId);
     return;
   }
@@ -362,6 +378,7 @@ async function handleShellInputLine(
   }
   if (slashCommand?.kind === "logout") {
     const profiles = await logoutProfile(config, slashCommand.profileId);
+    ui.setProfileStatuses(profiles);
     ui.writeLine(`logout: cleared stored auth for ${slashCommand.profileId}`);
     renderProfiles(ui, profiles, config.profileId);
     return;
@@ -372,6 +389,7 @@ async function handleShellInputLine(
       defaultModel: slashCommand.defaultModel,
       apiBase: slashCommand.apiBase,
     });
+    ui.setProfileStatuses(profiles);
     ui.writeLine("login: saved openrouter-main and set it as default");
     renderProfiles(ui, profiles, "openrouter-main");
     const decisionVersion = ui.decisionVersion();
@@ -387,6 +405,7 @@ async function handleShellInputLine(
       defaultModel: slashCommand.defaultModel,
       apiBase: slashCommand.apiBase,
     });
+    ui.setProfileStatuses(profiles);
     ui.writeLine("login: saved anthropic-api and set it as default");
     renderProfiles(ui, profiles, "anthropic-api");
     const decisionVersion = ui.decisionVersion();
@@ -403,6 +422,7 @@ async function handleShellInputLine(
       apiBase: slashCommand.apiBase,
       accountScope: slashCommand.accountScope,
     });
+    ui.setProfileStatuses(profiles);
     ui.writeLine("login: saved anthropic-main and set it as default");
     renderProfiles(ui, profiles, "anthropic-main");
     const decisionVersion = ui.decisionVersion();
@@ -605,8 +625,8 @@ function createRenderer(rawEvents: boolean) {
 function renderInteractiveEvent(
   rawEvents: boolean,
   event: SessionEvent,
-  previousState: SessionStateSnapshot | null,
-  currentState: SessionStateSnapshot | null,
+  _previousState: SessionStateSnapshot | null,
+  _currentState: SessionStateSnapshot | null,
   streamedTurns: Set<string>,
 ): string[] {
   if (rawEvents) {
@@ -614,20 +634,6 @@ function renderInteractiveEvent(
   }
 
   const lines: string[] = [];
-  if (!previousState && currentState) {
-    lines.push(`session: ${event.session_id}`);
-    lines.push(`mode: ${currentState.mode}`);
-    lines.push(`model: ${currentState.model}`);
-  } else if (
-    event.kind === "session_state" &&
-    previousState &&
-    currentState &&
-    currentState.status === "active" &&
-    (currentState.model !== previousState.model ||
-      currentState.profile_id !== previousState.profile_id)
-  ) {
-    lines.push(`session: model=${currentState.model} profile=${currentState.profile_id}`);
-  }
 
   if (event.kind === "assistant_delta") {
     if (event.payload.turn_id !== "") {
@@ -654,6 +660,27 @@ function renderInteractiveEvent(
   }
 
   return lines;
+}
+
+function buildInteractiveHeader(
+  config: ShellConfig,
+  state: SessionStateSnapshot | null,
+  profiles: ProfileStatus[],
+): InteractiveShellHeader {
+  const sessionId = config.resumeSessionId || config.sessionId;
+  const mode = state?.mode ?? "interactive";
+  const profileId = state?.profile_id || config.profileId || "default";
+  const model = state?.model || config.model || "default";
+  const activeProfile = profiles.find((entry) => entry.profile.id === profileId);
+
+  return {
+    sessionId,
+    mode,
+    profileId,
+    provider: activeProfile?.profile.provider ?? "unknown",
+    authState: activeProfile?.auth.state ?? "unknown",
+    model,
+  };
 }
 
 function renderEvent(event: SessionEvent): string {

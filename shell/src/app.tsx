@@ -1,7 +1,17 @@
 import React, { useEffect } from "react";
 import { Box, Static, Text, useApp } from "ink";
 
+export interface InteractiveShellHeader {
+  sessionId: string;
+  mode: string;
+  profileId: string;
+  provider: string;
+  authState: string;
+  model: string;
+}
+
 export interface InteractiveShellProps {
+  header: InteractiveShellHeader;
   lines: string[];
   promptLabel: string;
   inputValue: string;
@@ -21,8 +31,15 @@ export function InteractiveShell(props: InteractiveShellProps) {
   return (
     <Box flexDirection="column">
       <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-        <Text color="cyanBright">Klaude Kode</Text>
-        <Text dimColor> interactive shell</Text>
+        <Box flexDirection="column">
+          <Text color="cyanBright">Klaude Kode</Text>
+          <Text dimColor>
+            session={props.header.sessionId} mode={props.header.mode}
+          </Text>
+          <Text dimColor>
+            profile={props.header.profileId} provider={props.header.provider} auth={props.header.authState} model={props.header.model}
+          </Text>
+        </Box>
       </Box>
       <Box marginTop={1}>
         <Text dimColor>Type /help for commands. Type /exit to close the session.</Text>
