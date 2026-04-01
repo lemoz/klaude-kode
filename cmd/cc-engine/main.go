@@ -887,10 +887,12 @@ func renderProfileCatalogText(stdout io.Writer, catalog profileCatalogResult) er
 		lines = append(lines, line)
 		if profile.Auth.ExpiresAt != "" {
 			lines = append(lines, fmt.Sprintf("  expires_at: %s", profile.Auth.ExpiresAt))
+		} else {
+			lines = append(lines, "  expires_at: n/a")
 		}
-		if profile.Auth.CanRefresh {
-			lines = append(lines, "  can_refresh: true")
-		}
+		lines = append(lines, fmt.Sprintf("  auth_method: %s", profile.Profile.Kind))
+		lines = append(lines, fmt.Sprintf("  default_model: %s", profile.Profile.DefaultModel))
+		lines = append(lines, fmt.Sprintf("  can_refresh: %t", profile.Auth.CanRefresh))
 		if profile.Validation.Message != "" {
 			lines = append(lines, fmt.Sprintf("  validation: %s", profile.Validation.Message))
 		}

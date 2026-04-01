@@ -656,6 +656,34 @@ func TestRunToolPromptIncludesPermissionAndToolEvents(t *testing.T) {
 	}
 }
 
+func TestProfilesTextIncludesAuthDetails(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := filepath.Join(t.TempDir(), "state-root")
+
+	err := run([]string{
+		"-format=text",
+		"-profiles",
+		"-state-root=" + root,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("profiles run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"auth_method: anthropic_oauth",
+		"default_model: claude-sonnet-4-6",
+		"expires_at: n/a",
+		"can_refresh: false",
+		"auth_method: openrouter_api_key",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in profile output, got %q", expected, output)
+		}
+	}
+}
+
 func createValidCandidateRoot(t *testing.T) string {
 	t.Helper()
 
