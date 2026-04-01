@@ -40,6 +40,7 @@ type config struct {
 	SummarizeRuns       bool
 	ShowRun             bool
 	DiffRuns            bool
+	ListFrontier        bool
 	UpsertProfile       bool
 	AnthropicOAuthLogin bool
 	LogoutProfileID     string
@@ -65,6 +66,7 @@ type config struct {
 	RunID               string
 	LeftRunID           string
 	RightRunID          string
+	FrontierLimit       int
 }
 
 type result struct {
@@ -167,6 +169,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 		}
 		return renderDiffRuns(cfg, stdout)
 	}
+	if cfg.ListFrontier {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-list-frontier does not support -format=events")
+		}
+		return renderListFrontier(cfg, stdout)
+	}
 	if cfg.RunReplayEval {
 		if cfg.Format == outputFormatEvents {
 			return fmt.Errorf("-run-replay-eval does not support -format=events")
@@ -234,6 +242,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
 	showRunValue := fs.Bool("show-run", false, "show a persisted replay evaluation run and exit")
 	diffRunsValue := fs.Bool("diff-runs", false, "diff two persisted replay evaluation runs and exit")
+	listFrontierValue := fs.Bool("list-frontier", false, "list the best persisted eval runs and exit")
 	runReplayEvalValue := fs.Bool("run-replay-eval", false, "run a replay evaluation for the current candidate root and exit")
 	runBenchmarkEvalValue := fs.Bool("run-benchmark-eval", false, "run a benchmark evaluation for the current candidate root and exit")
 	upsertProfileValue := fs.Bool("upsert-profile", false, "create or update a stored auth profile and exit")
@@ -261,6 +270,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	runIDValue := fs.String("run-id", "", "run identifier for -show-run")
 	leftRunIDValue := fs.String("left-run-id", "", "left run identifier for -diff-runs")
 	rightRunIDValue := fs.String("right-run-id", "", "right run identifier for -diff-runs")
+	frontierLimitValue := fs.Int("frontier-limit", 10, "maximum number of frontier entries to return")
 
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -291,6 +301,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		SummarizeRuns:       *summarizeRunsValue,
 		ShowRun:             *showRunValue,
 		DiffRuns:            *diffRunsValue,
+		ListFrontier:        *listFrontierValue,
 		RunReplayEval:       *runReplayEvalValue,
 		RunBenchmarkEval:    *runBenchmarkEvalValue,
 		UpsertProfile:       *upsertProfileValue,
@@ -318,6 +329,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		RunID:               strings.TrimSpace(*runIDValue),
 		LeftRunID:           strings.TrimSpace(*leftRunIDValue),
 		RightRunID:          strings.TrimSpace(*rightRunIDValue),
+		FrontierLimit:       *frontierLimitValue,
 	}, nil
 }
 
@@ -772,6 +784,24 @@ func renderDiffRuns(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderListFrontier(cfg config, stdout io.Writer) error {
+	entries, err := harness.ListFrontier(harness.DefaultArtifactRoot(cfg.CWD), cfg.FrontierLimit)
+	if err != nil {
+		return err
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderListFrontierText(stdout, entries)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(entries)
+	}
+}
+
 func upsertProfileAndRenderCatalog(ctx context.Context, runtime engine.Engine, cfg config, stdout io.Writer) error {
 	profile, err := buildProfileFromConfig(cfg)
 	if err != nil {
@@ -1046,6 +1076,25 @@ func renderDiffRunsText(stdout io.Writer, diff harness.EvalRunDiff) error {
 	}
 	if len(diff.CaseDiffs) > 0 {
 		lines = append(lines, fmt.Sprintf("case_diffs: %d", len(diff.CaseDiffs)))
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderListFrontierText(stdout io.Writer, entries []harness.FrontierEntry) error {
+	lines := []string{
+		"cc-engine frontier",
+		fmt.Sprintf("entries: %d", len(entries)),
+	}
+	for _, entry := range entries {
+		line := fmt.Sprintf("- %s kind=%s status=%s score=%.2f", entry.RunID, entry.Kind, entry.Status, entry.Score)
+		lines = append(lines, line)
+		if entry.Benchmark != "" {
+			lines = append(lines, fmt.Sprintf("  benchmark: %s", entry.Benchmark))
+		}
+		if entry.FailureCode != "" {
+			lines = append(lines, fmt.Sprintf("  failure_code: %s", entry.FailureCode))
+		}
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err

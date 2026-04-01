@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
@@ -540,6 +541,71 @@ func TestRunDiffRunsJSON(t *testing.T) {
 	}
 	if len(got.CaseDiffs) != 1 || got.CaseDiffs[0].ScoreDelta != 1 {
 		t.Fatalf("expected one improving case diff, got %#v", got)
+	}
+}
+
+func TestRunListFrontierJSON(t *testing.T) {
+	candidateRoot := createValidCandidateRoot(t)
+	artifactRoot := harness.DefaultArtifactRoot(candidateRoot)
+	for _, run := range []harness.EvalRun{
+		{
+			ID:            "run_low",
+			Kind:          harness.EvalRunKindReplay,
+			SchemaVersion: contracts.SchemaVersionV1,
+			CreatedAt:     time.Unix(100, 0).UTC(),
+			Status:        harness.EvalRunStatusFailed,
+			Score:         0.5,
+			Failure: &harness.EvalFailureSummary{
+				Code:      "benchmark_cases_failed",
+				Message:   "1 benchmark cases failed",
+				Retryable: false,
+			},
+		},
+		{
+			ID:            "run_high_old",
+			Kind:          harness.EvalRunKindReplay,
+			SchemaVersion: contracts.SchemaVersionV1,
+			CreatedAt:     time.Unix(200, 0).UTC(),
+			Status:        harness.EvalRunStatusCompleted,
+			Score:         1,
+		},
+		{
+			ID:            "run_high_new",
+			Kind:          harness.EvalRunKindBenchmark,
+			SchemaVersion: contracts.SchemaVersionV1,
+			CreatedAt:     time.Unix(300, 0).UTC(),
+			Status:        harness.EvalRunStatusCompleted,
+			Score:         1,
+			Benchmark: &harness.BenchmarkRunMetadata{
+				Name: "baseline-pack",
+			},
+		},
+	} {
+		if _, err := harness.PersistEvalRun(artifactRoot, run); err != nil {
+			t.Fatalf("PersistEvalRun returned error: %v", err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run([]string{
+		"-format=json",
+		"-list-frontier",
+		"-frontier-limit=2",
+		"-cwd=" + candidateRoot,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("list frontier returned error: %v", err)
+	}
+
+	var got []harness.FrontierEntry
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse frontier output: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 frontier entries, got %#v", got)
+	}
+	if got[0].RunID != "run_high_new" || got[1].RunID != "run_high_old" {
+		t.Fatalf("expected frontier order by score then recency, got %#v", got)
 	}
 }
 
