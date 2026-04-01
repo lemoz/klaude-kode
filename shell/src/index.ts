@@ -17,10 +17,12 @@ import {
   makeUpdateSessionSettingCommand,
   makeUserInputCommand,
   runReplayEval,
+  summarizeRuns,
   startEngineSession,
   validateCandidate,
   type CandidateValidationResult,
   type EvalRun,
+  type EvalRunSummary,
   type PermissionEventPayload,
   type ProfileStatus,
   exportReplayPack,
@@ -187,6 +189,12 @@ async function runInteractiveLoop(
         }
         if (slashCommand?.kind === "status") {
           renderStatus(ui, config, ui.currentState());
+          ui.showPrompt(ui.currentPrompt());
+          continue;
+        }
+        if (slashCommand?.kind === "summarize_runs") {
+          const summary = await summarizeRuns(config);
+          renderRunSummary(ui, summary);
           ui.showPrompt(ui.currentPrompt());
           continue;
         }
@@ -505,6 +513,7 @@ function parseSlashCommand(
   | { kind: "setting"; key: "model" | "profile_id"; value: string }
   | { kind: "profiles" }
   | { kind: "status" }
+  | { kind: "summarize_runs" }
   | { kind: "validate_candidate" }
   | { kind: "run_replay"; replayPath: string }
   | { kind: "export_replay"; outputPath: string }
@@ -524,6 +533,9 @@ function parseSlashCommand(
   }
   if (trimmed === "/status") {
     return { kind: "status" };
+  }
+  if (trimmed === "/summarize-runs") {
+    return { kind: "summarize_runs" };
   }
   if (trimmed === "/validate-candidate") {
     return { kind: "validate_candidate" };
@@ -758,6 +770,28 @@ function renderCandidateValidation(
   }
 }
 
+function renderRunSummary(
+  ui: ReturnType<typeof createRenderer>,
+  summary: EvalRunSummary,
+): void {
+  ui.writeLine("runs:");
+  ui.writeLine(`- artifact_root: ${summary.artifact_root}`);
+  ui.writeLine(`  total_runs: ${summary.total_runs}`);
+  ui.writeLine(`  completed: ${summary.completed}`);
+  ui.writeLine(`  failed: ${summary.failed}`);
+  ui.writeLine(`  average_score: ${summary.average_score.toFixed(2)}`);
+  ui.writeLine(`  latest_run: ${summary.latest_run_id || "none"}`);
+  ui.writeLine(`  latest_status: ${summary.latest_status || "none"}`);
+  const failureCodes = Object.entries(summary.failure_codes ?? {});
+  if (failureCodes.length > 0) {
+    const rendered = failureCodes
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([code, count]) => `${code}=${count}`)
+      .join(", ");
+    ui.writeLine(`  failure_codes: ${rendered}`);
+  }
+}
+
 function renderReplayEval(
   ui: ReturnType<typeof createRenderer>,
   evalRun: EvalRun,
@@ -825,6 +859,7 @@ function printHelp(): void {
     "Interactive commands:",
     "  /profiles",
     "  /status",
+    "  /summarize-runs",
     "  /validate-candidate",
     "  /run-replay <path>",
     "  /export-replay <path>",

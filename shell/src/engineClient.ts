@@ -158,6 +158,17 @@ export interface EvalRun {
   failure: EvalFailureSummary | null;
 }
 
+export interface EvalRunSummary {
+  artifact_root: string;
+  total_runs: number;
+  completed: number;
+  failed: number;
+  average_score: number;
+  latest_run_id: string;
+  latest_status: string;
+  failure_codes: Record<string, number>;
+}
+
 export interface SessionStateSnapshot {
   cwd: string;
   mode: string;
@@ -415,6 +426,18 @@ export async function runReplayEval(
     `-state-root=${config.stateRoot}`,
   ]);
   return JSON.parse(stdout) as EvalRun;
+}
+
+export async function summarizeRuns(
+  config: Pick<ShellConfig, "stateRoot" | "cwd">,
+): Promise<EvalRunSummary> {
+  const stdout = await runEngineAdminCommand([
+    "-format=json",
+    "-summarize-runs",
+    `-cwd=${config.cwd}`,
+    `-state-root=${config.stateRoot}`,
+  ]);
+  return JSON.parse(stdout) as EvalRunSummary;
 }
 
 export async function logoutProfile(
