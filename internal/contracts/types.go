@@ -63,6 +63,8 @@ const (
 	EventKindToolCallCompleted   EventKind = "tool_call_completed"
 	EventKindPermissionRequested EventKind = "permission_requested"
 	EventKindPermissionResolved  EventKind = "permission_resolved"
+	EventKindHookLifecycle      EventKind = "hook_lifecycle"
+	EventKindPluginStatus       EventKind = "plugin_status"
 	EventKindSessionState        EventKind = "session_state"
 	EventKindWarning             EventKind = "warning"
 	EventKindFailure             EventKind = "failure"
@@ -208,6 +210,8 @@ type SessionEventPayload struct {
 	State           *SessionStateSnapshot   `json:"state"`
 	Tool            *ToolEventPayload       `json:"tool"`
 	Permission      *PermissionEventPayload `json:"permission"`
+	Hook            *HookEventPayload       `json:"hook"`
+	Plugin          *PluginStatusPayload    `json:"plugin"`
 	LifecycleName   string                  `json:"lifecycle_name"`
 	TerminalOutcome TerminalOutcome         `json:"terminal_outcome"`
 	Warning         string                  `json:"warning"`
@@ -234,6 +238,28 @@ type PermissionEventPayload struct {
 	Scope        string `json:"scope"`
 	Resolution   string `json:"resolution"`
 	Actor        string `json:"actor"`
+}
+
+type HookEventPayload struct {
+	HookID    string `json:"hook_id"`
+	EventName string `json:"event_name"`
+	Command   string `json:"command"`
+	State     string `json:"state"`
+	ExitCode  int    `json:"exit_code"`
+	Message   string `json:"message"`
+	Failed    bool   `json:"failed"`
+}
+
+type PluginStatusPayload struct {
+	PluginID   string   `json:"plugin_id"`
+	Name       string   `json:"name"`
+	Loaded     bool     `json:"loaded"`
+	Valid      bool     `json:"valid"`
+	Error      string   `json:"error"`
+	Commands   []string `json:"commands"`
+	Agents     []string `json:"agents"`
+	HookCount  int      `json:"hook_count"`
+	MCPServers int      `json:"mcp_servers"`
 }
 
 type FailurePayload struct {
