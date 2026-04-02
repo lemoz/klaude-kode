@@ -45,7 +45,23 @@ Shell/tmux verification steps add one more requirement:
   session names so cleanup stays targeted
 - do not commit or push with stale smoke terminals still running
 
-## 3. Phase 0: Inventory and Contracts
+## 3. Current Phase Status
+
+Status snapshot as of `2026-04-02`:
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 0: Inventory and Contracts | `complete` | upstream-first parity intake and core contracts are documented |
+| Phase 1: Headless Core | `complete` | Go engine, persistence, replay/resume, CLI modes, and provider boundary are in place |
+| Phase 2: Thin TS Shell | `complete` | interactive Ink shell, auth/profile/model/help/report surfaces, and shell smoke gates are green |
+| Phase 3: Provider Expansion | `complete` | Anthropic OAuth/API-key and OpenRouter API-key flows, capability handling, and provider smoke gates are green |
+| Phase 4: Plugins, Hooks, MCP, and Marketplace Surfaces | `next` | next execution phase |
+| Phase 5: Remote and Detached Sessions | `not_started` | depends on Phase 4 and stronger local parity surfaces |
+| Phase 6: Harness Surface and Offline Evaluation | `complete_baseline` | replay/benchmark/export/report baseline is implemented and usable |
+| Phase 7: Cutover and Import | `not_started` | import and coexistence work remains ahead |
+| Phase 8: Distribution and Install Parity | `not_started` | packaging and install parity remain ahead |
+
+## 4. Phase 0: Inventory and Contracts
 
 ### Deliverables
 
@@ -77,7 +93,7 @@ Shell/tmux verification steps add one more requirement:
 - preserve/simplify/drop decisions approved
 - engine and shell responsibilities are non-overlapping
 
-## 4. Phase 1: Headless Core
+## 5. Phase 1: Headless Core
 
 ### Scope
 
@@ -114,7 +130,7 @@ Shell/tmux verification steps add one more requirement:
 - event log is authoritative
 - no Anthropic SDK types escape the adapter boundary
 
-## 5. Phase 2: Thin TS Shell
+## 6. Phase 2: Thin TS Shell
 
 ### Scope
 
@@ -190,7 +206,20 @@ Do not require:
 - prompt, transcript, status, permission, and help flows feel cohesive as one
   product experience rather than a collection of shell commands
 
-## 6. Phase 3: Provider Expansion
+### Current Status
+
+- `complete` as of `2026-04-02`
+- phase-close verification now includes the aggregate shell smoke suite:
+  - `npm run smoke:tmux`
+  - `npm run smoke:permissions`
+  - `npm run smoke:oauth`
+  - `npm run smoke:anthropic`
+  - `npm run smoke:profiles`
+  - `npm run smoke:models`
+  - `npm run smoke:openrouter`
+  - `npm run smoke:shell`
+
+## 7. Phase 3: Provider Expansion
 
 ### Scope
 
@@ -224,7 +253,17 @@ Do not require:
 - Anthropic and OpenRouter work side by side
 - provider mismatch failures are typed and recoverable
 
-## 7. Phase 4: Plugins, Hooks, MCP, and Marketplace Surfaces
+### Current Status
+
+- `complete` as of `2026-04-02`
+- phase-close verification includes:
+  - Anthropic OAuth progress and login UX smoke coverage
+  - Anthropic API-key live-path smoke coverage
+  - OpenRouter API-key live-path smoke coverage
+  - profile switching and model-flow smoke coverage
+  - capability handling and invalid-model validation coverage
+
+## 8. Phase 4: Plugins, Hooks, MCP, and Marketplace Surfaces
 
 ### Scope
 
@@ -265,7 +304,7 @@ Do not require:
 - plugin and marketplace-facing behavior are driven by typed manifests rather
   than shell ad hoc logic
 
-## 8. Phase 5: Remote and Detached Sessions
+## 9. Phase 5: Remote and Detached Sessions
 
 ### Scope
 
@@ -301,7 +340,7 @@ Do not require:
 - all transport modes use the same event schema
 - reconnect and resume scenarios meet stability gates
 
-## 9. Phase 6: Harness Surface and Offline Evaluation
+## 10. Phase 6: Harness Surface and Offline Evaluation
 
 ### Scope
 
@@ -340,7 +379,7 @@ Do not require:
 - validation runs fail fast before expensive evaluation
 - harness outputs are stable enough for external tooling to consume
 
-## 10. Phase 7: Cutover and Import
+## 11. Phase 7: Cutover and Import
 
 ### Scope
 
@@ -373,7 +412,7 @@ Do not require:
 - users can adopt without destroying the old runtime
 - importer is repeatable and non-destructive
 
-## 11. Phase 8: Distribution and Install Parity
+## 12. Phase 8: Distribution and Install Parity
 
 ### Scope
 
@@ -407,7 +446,7 @@ Do not require:
   source
 - update behavior is documented and tested for supported packaging paths
 
-## 12. Rollout Gates
+## 13. Rollout Gates
 
 Progress to the next phase only when:
 
@@ -417,7 +456,7 @@ Progress to the next phase only when:
 - rollback path is documented
 - the phase-ending step has been committed and pushed
 
-## 13. Migration Guardrails
+## 14. Migration Guardrails
 
 - keep storage roots separate until final cutover
 - never rewrite current Claude Code configs in place

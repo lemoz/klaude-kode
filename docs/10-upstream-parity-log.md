@@ -78,3 +78,39 @@ Next recommended atomic units:
     closely.
   - Richer `/model` UX parity such as dedicated selection views and broader
     session-surface affordances is still not started.
+
+### Phase 2 and Phase 3 Local Parity Closure
+
+Reviewed upstream sources:
+
+- [anthropics/claude-code](https://github.com/anthropics/claude-code)
+- [upstream README](https://raw.githubusercontent.com/anthropics/claude-code/main/README.md)
+- [upstream CHANGELOG](https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md)
+
+What was verified locally:
+
+- interactive shell flow with help, prompt, grouped transcript, permissions,
+  status, profile switching, model switching, and report surfaces
+- Anthropic OAuth in-band progress UX and fallback URL visibility
+- Anthropic API-key login and live provider turn coverage
+- OpenRouter API-key login, profile switching, and custom-model live turn
+  coverage
+- aggregate shell smoke coverage across `tmux`, permissions, auth, profile,
+  model, and provider paths
+
+Updated local parity read:
+
+| Area | Upstream status | Local status | Notes |
+| --- | --- | --- | --- |
+| Local shell UX | active and user-facing | `matched` | local interactive baseline is complete for the current roadmap scope |
+| Providers/auth | active and user-facing | `matched` | Anthropic OAuth/API-key and OpenRouter API-key flows are complete for the current roadmap scope |
+| Plugins/hooks | first-class | `not_started` | next execution phase |
+| MCP | first-class | `not_started` | next execution phase after plugin/hook contracts |
+| Harness/eval | limited upstream emphasis | `divergent` | intentional Klaude Kode extension beyond upstream |
+| Install/distribution | first-class | `not_started` | later roadmap phase |
+
+Next recommended atomic units:
+
+1. add plugin manifest contracts and validation helpers
+2. add hook event contracts and hook status surfaces
+3. add engine-owned MCP lifecycle and status events before tool projection

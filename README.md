@@ -63,7 +63,18 @@ This repo is not yet a full Claude Code replacement, but it is past
 blueprint-only state. The current implementation supports:
 
 - persisted sessions, replay/resume, and local shell transport
+- a completed Phase 2 local shell UX baseline with:
+  - grouped transcript rendering
+  - help, profile, model, and status surfaces
+  - permission prompts
+  - native replay/benchmark/frontier/diff views
+  - tmux-backed shell smoke coverage
 - Anthropic API key, Anthropic OAuth, and OpenRouter API-key profiles
+- a completed Phase 3 local provider baseline with:
+  - Anthropic OAuth login progress and refresh handling
+  - Anthropic API-key login and live provider turns
+  - OpenRouter API-key login, custom-model support, and live provider turns
+  - capability-mismatch handling and provider/profile/model smoke coverage
 - live provider-backed CLI and shell turns
 - replay-pack export
 - candidate validation
@@ -72,12 +83,11 @@ blueprint-only state. The current implementation supports:
 
 The next implementation steps are:
 
-1. Finish the remaining shell UX and provider-hardening closure work.
-2. Expand MCP, hooks, plugin, and marketplace parity.
-3. Add remote, detached, and attachable session support.
-4. Deepen tool runtime parity and permissions policy.
-5. Extend harness reporting, candidate metadata, and external evaluator hooks.
-6. Add install and distribution parity for the supported platforms.
+1. Expand plugins, hooks, MCP, and marketplace-facing parity.
+2. Add remote, detached, and attachable session support.
+3. Deepen tool runtime parity and permissions policy.
+4. Extend harness reporting, candidate metadata, and external evaluator hooks.
+5. Add install and distribution parity for the supported platforms.
 
 ## Working Agreement
 
