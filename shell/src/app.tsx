@@ -65,10 +65,67 @@ export interface InteractiveShellProps {
   onData: (input: string) => void;
 }
 
+type OperationTone = "info" | "warning" | "failure";
+
+interface RenderedOperationLine {
+  tone: OperationTone;
+  text: string;
+}
+
+function formatTranscriptWarning(warning: string): string {
+  if (warning.includes("capability fallback")) {
+    return `capability fallback: ${warning}`;
+  }
+  return `warning: ${warning}`;
+}
+
+function formatTranscriptFailure(failure: NonNullable<TranscriptTurn["failure"]>): string {
+  if (failure.code === "capability_mismatch") {
+    return `capability rejected: ${failure.message}`;
+  }
+  return `failure: ${failure.category}/${failure.code} ${failure.message}`;
+}
+
+function classifyOperationLine(line: string): RenderedOperationLine {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("warning:")) {
+    const warningText = trimmed.slice("warning:".length).trim();
+    if (warningText.includes("capability fallback")) {
+      return {
+        tone: "warning",
+        text: `capability fallback: ${warningText}`,
+      };
+    }
+    return {
+      tone: "warning",
+      text: trimmed,
+    };
+  }
+  if (trimmed.startsWith("failure:")) {
+    const detail = trimmed.replace(/^failure:[^\s]+\s+retryable=\w+\s+/, "");
+    if (trimmed.includes("/capability_mismatch")) {
+      return {
+        tone: "failure",
+        text: `capability rejected: ${detail}`,
+      };
+    }
+    return {
+      tone: "failure",
+      text: trimmed,
+    };
+  }
+  return {
+    tone: "info",
+    text: trimmed,
+  };
+}
+
 export function InteractiveShell(props: InteractiveShellProps) {
   const { exit } = useApp();
   const { stdin, setRawMode, isRawModeSupported } = useStdin();
-  const visibleOperationLines = props.lines.filter((line) => line.trim() !== "");
+  const visibleOperationLines = props.lines
+    .filter((line) => line.trim() !== "")
+    .map(classifyOperationLine);
   const onDataRef = useRef(props.onData);
 
   onDataRef.current = props.onData;
@@ -177,7 +234,7 @@ export function InteractiveShell(props: InteractiveShellProps) {
               })}
               {turn.warnings.map((warning, index) => (
                 <Text key={`${turn.turnId}:warning:${index}`} color={SHELL_THEME.warning}>
-                  warning: {warning}
+                  {formatTranscriptWarning(warning)}
                 </Text>
               ))}
               {assistantText !== "" ? (
@@ -188,7 +245,7 @@ export function InteractiveShell(props: InteractiveShellProps) {
               ) : null}
               {turn.failure ? (
                 <Text color={SHELL_THEME.danger}>
-                  failure: {turn.failure.category}/{turn.failure.code} {turn.failure.message}
+                  {formatTranscriptFailure(turn.failure)}
                 </Text>
               ) : null}
             </Box>
@@ -218,8 +275,19 @@ export function InteractiveShell(props: InteractiveShellProps) {
         <Box borderStyle="round" borderColor={SHELL_THEME.activity} paddingX={1} flexDirection="column" marginTop={1}>
           <Text color={SHELL_THEME.activity}>Operations</Text>
           {visibleOperationLines.map((line, index) => (
-            <Text key={`${index}:${line}`} dimColor>
-              {line}
+            <Text
+              key={`${index}:${line.text}`}
+              color={
+                line.tone === "failure"
+                  ? SHELL_THEME.danger
+                  : line.tone === "warning"
+                    ? SHELL_THEME.warning
+                    : undefined
+              }
+              bold={line.tone !== "info"}
+              dimColor={line.tone === "info"}
+            >
+              {line.text}
             </Text>
           ))}
         </Box>
