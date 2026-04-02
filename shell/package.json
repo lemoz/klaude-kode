@@ -7,6 +7,7 @@
     "check": "tsc --noEmit",
     "cleanup:smokes": "../scripts/cleanup-shell-smokes.sh",
     "dev": "tsx src/index.ts",
+    "smoke:anthropic": "../scripts/smoke-shell-anthropic.sh",
     "smoke:oauth": "../scripts/smoke-shell-oauth.sh",
     "smoke:permissions": "../scripts/smoke-shell-permissions.sh",
     "smoke:tmux": "../scripts/smoke-shell-ui.sh"
