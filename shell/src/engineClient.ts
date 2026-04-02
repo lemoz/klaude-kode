@@ -64,6 +64,7 @@ export interface ProfileValidationResult {
 
 export interface ProfileAuthStatus {
   state: string;
+  method: string;
   expires_at: string;
   can_refresh: boolean;
 }

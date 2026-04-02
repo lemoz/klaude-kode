@@ -782,6 +782,7 @@ function buildInteractiveHeader(
     profileId,
     provider: activeProfile?.profile.provider ?? "unknown",
     authState: activeProfile?.auth.state ?? "unknown",
+    authMethod: activeProfile?.auth.method || activeProfile?.profile.kind || "unknown",
     authDetail: formatHeaderAuthDetail(activeProfile),
     model,
     defaultModel: activeProfile?.profile.default_model ?? "unknown",
@@ -1188,7 +1189,7 @@ function renderProfiles(
   for (const entry of profiles) {
     const currentMarker = entry.profile.id === activeProfileID ? " (active)" : "";
     ui.writeLine(
-      `- ${entry.profile.id}${currentMarker} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid} auth=${entry.auth.state}`,
+      `- ${entry.profile.id}${currentMarker} (${entry.profile.provider}/${entry.profile.kind}) default_model=${entry.profile.default_model} valid=${entry.validation.valid} auth=${entry.auth.state} auth_method=${entry.auth.method || entry.profile.kind}`,
     );
     if (entry.auth.expires_at !== "") {
       ui.writeLine(`  expires_at: ${entry.auth.expires_at}`);

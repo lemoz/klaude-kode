@@ -312,6 +312,7 @@ const (
 
 type ProfileAuthStatus struct {
 	State      ProfileAuthState `json:"state"`
+	Method     string           `json:"method"`
 	ExpiresAt  string           `json:"expires_at"`
 	CanRefresh bool             `json:"can_refresh"`
 }

@@ -20,6 +20,7 @@ export interface InteractiveShellHeader {
   profileId: string;
   provider: string;
   authState: string;
+  authMethod: string;
   authDetail: string;
   model: string;
   defaultModel: string;
@@ -171,7 +172,7 @@ export function InteractiveShell(props: InteractiveShellProps) {
             session={props.header.sessionId} mode={props.header.mode}
           </Text>
           <Text dimColor>
-            profile={props.header.profileId} provider={props.header.provider} auth={props.header.authState} model={props.header.model}
+            profile={props.header.profileId} provider={props.header.provider} auth={props.header.authState} method={props.header.authMethod} model={props.header.model}
           </Text>
           <Text dimColor>
             profile_default={props.header.defaultModel} {props.header.authDetail}

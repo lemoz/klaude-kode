@@ -1453,6 +1453,7 @@ func (e *InMemoryEngine) buildProfileStatus(ctx context.Context, profile contrac
 		},
 		Auth: describeProfileAuth(profile),
 	}
+	status.Auth.Method = string(profile.Kind)
 
 	if e.providers != nil {
 		validation, err := e.providers.ValidateProfile(ctx, profile)
