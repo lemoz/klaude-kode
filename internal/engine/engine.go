@@ -434,8 +434,16 @@ func (e *InMemoryEngine) handleSettingUpdateLocked(record *sessionRecord, cmd co
 
 	switch cmd.Payload.SettingKey {
 	case "model":
-		record.handle.Model = cmd.Payload.SettingValue
-		record.summary.Model = cmd.Payload.SettingValue
+		nextModel := strings.TrimSpace(cmd.Payload.SettingValue)
+		profile, err := e.resolveProfile(record.handle.ProfileID, nextModel)
+		if err != nil {
+			return err
+		}
+		if err := e.providers.ValidateModel(context.Background(), profile, nextModel); err != nil {
+			return err
+		}
+		record.handle.Model = nextModel
+		record.summary.Model = nextModel
 	case "profile_id":
 		nextProfile, nextModel, err := e.resolveProfileSetting(record.handle.ProfileID, record.handle.Model, cmd.Payload.SettingValue)
 		if err != nil {

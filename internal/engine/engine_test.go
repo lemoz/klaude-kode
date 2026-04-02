@@ -495,6 +495,58 @@ func TestUpdateSessionSettingChangesActiveModel(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionSettingRejectsInvalidModel(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_invalid_model_update",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+		ProfileID: "anthropic-main",
+		Model:     "claude-sonnet-4-6",
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	err = runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUpdateSessionSetting,
+		Payload: contracts.SessionCommandPayload{
+			SettingKey:   "model",
+			SettingValue: "claude-not-real",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid model update to fail")
+	}
+	providerErr := provider.AsError(err)
+	if providerErr == nil || providerErr.Code != provider.ErrorCodeInvalidModel {
+		t.Fatalf("expected invalid_model provider error, got %v", err)
+	}
+
+	summary, err := runtime.GetSessionSummary(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("GetSessionSummary returned error: %v", err)
+	}
+	if summary.Model != "claude-sonnet-4-6" {
+		t.Fatalf("expected model to remain unchanged after failed update, got %q", summary.Model)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+	for _, event := range events {
+		if event.Kind != contracts.EventKindSessionState || event.Payload.CommandID == "" {
+			continue
+		}
+		if event.Payload.State != nil && event.Payload.State.Model == "claude-not-real" {
+			t.Fatalf("unexpected invalid model snapshot in session state: %#v", event.Payload.State)
+		}
+	}
+}
+
 func TestProfileSwitchAdoptsStoredProfileDefaults(t *testing.T) {
 	ctx := context.Background()
 	runtime := NewInMemoryEngine()
@@ -718,7 +770,7 @@ func TestProviderTurnWarnsAndFallsBackWhenCapabilityFallbackIsAllowed(t *testing
 			Text:   "hello fallback capability",
 			Source: contracts.MessageSourceInteractive,
 			Metadata: map[string]string{
-				"deferred_tool_search":     "true",
+				"deferred_tool_search":      "true",
 				"allow_capability_fallback": "true",
 			},
 		},
