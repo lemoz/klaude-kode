@@ -11,6 +11,7 @@ import (
 
 	"github.com/cdossman/klaude-kode/internal/auth/anthropicoauth"
 	"github.com/cdossman/klaude-kode/internal/contracts"
+	"github.com/cdossman/klaude-kode/internal/hooks"
 	"github.com/cdossman/klaude-kode/internal/provider"
 	"github.com/cdossman/klaude-kode/internal/toolruntime"
 )
@@ -37,6 +38,7 @@ type InMemoryEngine struct {
 	toolRuntime      toolruntime.Runtime
 	providers        *provider.Registry
 	profileStore     provider.ProfileStore
+	hookConfig       hooks.Config
 }
 
 type sessionRecord struct {
@@ -104,6 +106,12 @@ func NewFileBackedEngine(root string) (*InMemoryEngine, error) {
 	}, nil
 }
 
+func (e *InMemoryEngine) SetHookConfig(config hooks.Config) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.hookConfig = config
+}
+
 func (e *InMemoryEngine) StartSession(_ context.Context, req contracts.StartSessionRequest) (contracts.SessionHandle, error) {
 	now := time.Now().UTC()
 	if err := e.applyProfileDefaults(&req); err != nil {
@@ -164,6 +172,10 @@ func (e *InMemoryEngine) StartSession(_ context.Context, req contracts.StartSess
 	if _, err := e.appendEventLocked(record, contracts.EventKindSessionStarted, contracts.SessionEventPayload{
 		State: e.nextStateSnapshotLocked(record),
 	}); err != nil {
+		delete(e.sessions, sessionID)
+		return contracts.SessionHandle{}, err
+	}
+	if err := e.emitHookLifecycleLocked(record, "", hooks.EventSessionStart, "scheduled", "session start hook scheduled"); err != nil {
 		delete(e.sessions, sessionID)
 		return contracts.SessionHandle{}, err
 	}
@@ -552,6 +564,13 @@ func (e *InMemoryEngine) closeSessionLocked(record *sessionRecord, reason string
 		record.pendingPermission = previousPending
 		return err
 	}
+	if err := e.emitHookLifecycleLocked(record, "", hooks.EventSessionEnd, "scheduled", "session end hook scheduled"); err != nil {
+		record.closed = false
+		record.summary.Status = contracts.SessionStatusActive
+		record.summary.ClosedReason = ""
+		record.pendingPermission = previousPending
+		return err
+	}
 	if _, err := e.appendEventLocked(record, contracts.EventKindSessionClosed, contracts.SessionEventPayload{
 		Reason: reason,
 	}); err != nil {
@@ -604,6 +623,27 @@ func (e *InMemoryEngine) appendEventLocked(record *sessionRecord, kind contracts
 	}
 
 	return event, nil
+}
+
+func (e *InMemoryEngine) emitHookLifecycleLocked(record *sessionRecord, turnID string, eventName hooks.EventName, state string, message string) error {
+	for _, definition := range e.hookConfig.Hooks {
+		if !definition.Enabled || definition.Event != eventName {
+			continue
+		}
+		if _, err := e.appendEventLocked(record, contracts.EventKindHookLifecycle, contracts.SessionEventPayload{
+			TurnID: turnID,
+			Hook: &contracts.HookEventPayload{
+				HookID:    definition.ID,
+				EventName: string(definition.Event),
+				Command:   definition.Command,
+				State:     state,
+				Message:   message,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *InMemoryEngine) persistRecordLocked(record *sessionRecord, event contracts.SessionEvent) error {
@@ -1236,6 +1276,9 @@ func (e *InMemoryEngine) resolvePendingPermissionLocked(record *sessionRecord, c
 	}
 
 	if !allow {
+		if err := e.emitHookLifecycleLocked(record, pending.TurnID, hooks.EventPermissionDenied, "scheduled", fmt.Sprintf("permission denied for tool %s", pending.ToolCall.Name)); err != nil {
+			return turnResult{}, err
+		}
 		err := fmt.Errorf("permission denied for tool %s", pending.ToolCall.Name)
 		if emitErr := e.emitFailureLocked(record, pending.TurnID, cmd.CommandID, contracts.FailureCategoryPermission, "permission_denied", err, contracts.TerminalOutcomeTaskFailure); emitErr != nil {
 			return turnResult{}, emitErr
@@ -1318,6 +1361,9 @@ func (e *InMemoryEngine) executeToolCallLocked(record *sessionRecord, turnID str
 			Failed:           failed,
 		},
 	}); err != nil {
+		return turnResult{}, err
+	}
+	if err := e.emitHookLifecycleLocked(record, turnID, hooks.EventPostToolUse, "scheduled", fmt.Sprintf("tool %s completed", call.Name)); err != nil {
 		return turnResult{}, err
 	}
 

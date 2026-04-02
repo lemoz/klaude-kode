@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
+	"github.com/cdossman/klaude-kode/internal/hooks"
 	"github.com/cdossman/klaude-kode/internal/provider"
 )
 
@@ -1314,6 +1315,125 @@ func TestDenyPermissionCompletesTurnWithFailure(t *testing.T) {
 	if events[10].Kind != contracts.EventKindSessionState || events[10].Payload.State == nil || events[10].Payload.State.TerminalOutcome != contracts.TerminalOutcomeTaskFailure {
 		t.Fatalf("expected task failure state after denial, got %#v", events[10].Payload.State)
 	}
+}
+
+func TestConfiguredHooksEmitLifecycleEventsForSessionStartAndEnd(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+	runtime.SetHookConfig(hooks.Config{
+		Hooks: []hooks.Definition{
+			{ID: "session-start-log", Event: hooks.EventSessionStart, Command: "echo start", Enabled: true},
+			{ID: "session-end-log", Event: hooks.EventSessionEnd, Command: "echo end", Enabled: true},
+		},
+	})
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_hook_lifecycle",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.CloseSession(ctx, handle.SessionID, "done"); err != nil {
+		t.Fatalf("CloseSession returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+
+	hookEvents := collectHookEvents(events)
+	if len(hookEvents) != 2 {
+		t.Fatalf("expected 2 hook lifecycle events, got %#v", hookEvents)
+	}
+	if hookEvents[0].EventName != string(hooks.EventSessionStart) || hookEvents[0].State != "scheduled" {
+		t.Fatalf("expected session_start scheduled hook, got %#v", hookEvents[0])
+	}
+	if hookEvents[1].EventName != string(hooks.EventSessionEnd) || hookEvents[1].State != "scheduled" {
+		t.Fatalf("expected session_end scheduled hook, got %#v", hookEvents[1])
+	}
+}
+
+func TestConfiguredHooksEmitLifecycleEventsForToolCompletionAndPermissionDenied(t *testing.T) {
+	ctx := context.Background()
+	runtime := NewInMemoryEngine()
+	runtime.SetHookConfig(hooks.Config{
+		Hooks: []hooks.Definition{
+			{ID: "post-tool-log", Event: hooks.EventPostToolUse, Command: "echo tool", Enabled: true},
+			{ID: "permission-denied-log", Event: hooks.EventPermissionDenied, Command: "echo denied", Enabled: true},
+		},
+	})
+
+	handle, err := runtime.StartSession(ctx, contracts.StartSessionRequest{
+		SessionID: "sess_hook_tool_permission",
+		CWD:       "/tmp/project",
+		Mode:      contracts.SessionModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "tool:pwd",
+			Source: contracts.MessageSourceInteractive,
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindUserInput,
+		Payload: contracts.SessionCommandPayload{
+			Text:   "tool:pwd",
+			Source: contracts.MessageSourceInteractive,
+			Metadata: map[string]string{
+				"permission_mode": "ask",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SendCommand returned error: %v", err)
+	}
+
+	if err := runtime.SendCommand(ctx, handle.SessionID, contracts.SessionCommand{
+		Kind: contracts.CommandKindDenyPermission,
+		Payload: contracts.SessionCommandPayload{
+			RequestID: "perm_tool_turn_2_1",
+		},
+	}); err != nil {
+		t.Fatalf("DenyPermission returned error: %v", err)
+	}
+
+	events, err := runtime.ListEvents(ctx, handle.SessionID)
+	if err != nil {
+		t.Fatalf("ListEvents returned error: %v", err)
+	}
+
+	hookEvents := collectHookEvents(events)
+	if len(hookEvents) != 2 {
+		t.Fatalf("expected 2 hook lifecycle events, got %#v", hookEvents)
+	}
+	if hookEvents[0].EventName != string(hooks.EventPostToolUse) || !strings.Contains(hookEvents[0].Message, "tool pwd completed") {
+		t.Fatalf("expected post_tool_use hook event, got %#v", hookEvents[0])
+	}
+	if hookEvents[1].EventName != string(hooks.EventPermissionDenied) || !strings.Contains(hookEvents[1].Message, "permission denied for tool pwd") {
+		t.Fatalf("expected permission_denied hook event, got %#v", hookEvents[1])
+	}
+}
+
+func collectHookEvents(events []contracts.SessionEvent) []contracts.HookEventPayload {
+	hookEvents := make([]contracts.HookEventPayload, 0)
+	for _, event := range events {
+		if event.Kind != contracts.EventKindHookLifecycle || event.Payload.Hook == nil {
+			continue
+		}
+		hookEvents = append(hookEvents, *event.Payload.Hook)
+	}
+	return hookEvents
 }
 
 func nextEvent(t *testing.T, stream <-chan contracts.SessionEvent) contracts.SessionEvent {
