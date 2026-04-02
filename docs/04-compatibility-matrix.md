@@ -6,6 +6,13 @@ Compatibility target is behavioral parity. Preserve what users experience,
 simplify what is internally accidental, and drop what is internal-only or
 operationally specific to Anthropic.
 
+Primary parity references are:
+
+1. the live upstream `anthropics/claude-code` repository
+2. upstream documentation and changelog
+3. the extracted `/Users/cdossman/Downloads/src` tree only as a fallback for
+   internal/runtime questions not answered publicly
+
 UI/UX parity policy:
 
 - preserve the recognizable interaction model and workflow shape
@@ -46,6 +53,7 @@ UI/UX parity policy:
 | Command registration | large mutable list gated by many feature flags | declarative command registry and capability-driven enablement |
 | Feature flags | heavy runtime branching | narrow rollout flags around whole subsystems only |
 | Model behavior | many hardcoded first-party assumptions | capability matrix checked by engine |
+| Parity intake | extracted private dump-first investigation | live upstream repo/docs first, extracted dump fallback only |
 
 ## 4. Drop
 

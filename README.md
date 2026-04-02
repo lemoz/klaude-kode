@@ -23,6 +23,19 @@ This repo currently contains:
 - a phased roadmap that requires verification, testing, commit, and push after
   every implementation step
 
+## Parity Sources
+
+Use parity sources in this order:
+
+1. the live upstream Claude Code repo at
+   [anthropics/claude-code](https://github.com/anthropics/claude-code)
+2. upstream docs and changelog from that repo
+3. the extracted reference tree at `/Users/cdossman/Downloads/src` only when
+   the public repo and docs do not answer an internal runtime question
+
+The live upstream repo is now the primary reference for current feature, UX,
+plugin, hooks, and packaging parity.
+
 ## Repo Layout
 
 - [docs](/Users/cdossman/klaude-kode/docs)
@@ -59,11 +72,12 @@ blueprint-only state. The current implementation supports:
 
 The next implementation steps are:
 
-1. Expand MCP, remote, and detached session support.
-2. Deepen tool runtime parity and permissions policy.
-3. Harden provider capability enforcement and model metadata.
-4. Extend harness reporting, candidate metadata, and external evaluator hooks.
-5. Continue UI/UX parity work under the Klaude Kode brand.
+1. Finish the remaining shell UX and provider-hardening closure work.
+2. Expand MCP, hooks, plugin, and marketplace parity.
+3. Add remote, detached, and attachable session support.
+4. Deepen tool runtime parity and permissions policy.
+5. Extend harness reporting, candidate metadata, and external evaluator hooks.
+6. Add install and distribution parity for the supported platforms.
 
 ## Working Agreement
 
@@ -172,3 +186,4 @@ Shell equivalents:
 - [06-test-benchmarks.md](/Users/cdossman/klaude-kode/docs/06-test-benchmarks.md)
 - [07-harness-schemas.md](/Users/cdossman/klaude-kode/docs/07-harness-schemas.md)
 - [08-harness-workflows.md](/Users/cdossman/klaude-kode/docs/08-harness-workflows.md)
+- [10-upstream-parity-log.md](/Users/cdossman/klaude-kode/docs/10-upstream-parity-log.md)

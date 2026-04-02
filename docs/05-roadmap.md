@@ -57,15 +57,18 @@ Shell/tmux verification steps add one more requirement:
 
 ### Step Sequence
 
-1. parity inventory from extracted Claude Code source
+1. parity inventory from live upstream Claude Code repo, docs, and changelog
 2. canonical command/event schema
 3. profile/settings/config precedence rules
 4. session storage and artifact layout
+5. fallback internal-runtime review from extracted source only where the public
+   repo is insufficient
 
 ### Verification Per Step
 
 - confirm the targeted contract is explicit and non-overlapping
 - update or add schema/docs fixtures where applicable
+- record which upstream source was used for the parity claim
 - run repo checks affected by the step before commit/push
 
 ### Exit Criteria
@@ -221,33 +224,37 @@ Do not require:
 - Anthropic and OpenRouter work side by side
 - provider mismatch failures are typed and recoverable
 
-## 7. Phase 4: MCP and Plugins
+## 7. Phase 4: Plugins, Hooks, MCP, and Marketplace Surfaces
 
 ### Scope
 
-- Go MCP supervisor
-- MCP auth management
+- Go plugin supervisor
+- hook execution and hook event model
+- Go MCP supervisor and MCP auth management
 - tool/resource projection
-- engine-owned hooks
 - plugin manifest split between engine and shell contributions
+- marketplace-facing plugin surfaces
 
 ### Deliverables
 
+- plugin status model
+- hook event model and hook execution runtime
 - MCP status model
 - reconnect and auth recovery
-- plugin loading and hook execution in the new runtime
+- plugin loading and marketplace-oriented manifest handling in the new runtime
 
 ### Step Sequence
 
-1. MCP supervisor lifecycle
-2. MCP auth and reconnect handling
-3. tool/resource projection
-4. hook execution
-5. plugin manifest loading and split responsibilities
+1. plugin and hook runtime contracts
+2. hook execution and hook event delivery
+3. MCP supervisor lifecycle
+4. MCP auth and reconnect handling
+5. tool/resource projection
+6. plugin manifest loading, marketplace metadata, and split responsibilities
 
 ### Verification Per Step
 
-- run the narrowest meaningful engine tests for touched MCP/plugin behavior
+- run the narrowest meaningful engine tests for touched plugin/hook/MCP behavior
 - verify auth recovery and reconnect flows when the step affects them
 - confirm shell behavior is rendering structured engine state, not rebuilding it
 
@@ -255,6 +262,8 @@ Do not require:
 
 - MCP-heavy sessions are stable
 - hook and plugin behavior is not TS-runtime-dependent
+- plugin and marketplace-facing behavior are driven by typed manifests rather
+  than shell ad hoc logic
 
 ## 8. Phase 5: Remote and Detached Sessions
 
@@ -364,7 +373,41 @@ Do not require:
 - users can adopt without destroying the old runtime
 - importer is repeatable and non-destructive
 
-## 11. Rollout Gates
+## 11. Phase 8: Distribution and Install Parity
+
+### Scope
+
+- install script parity
+- package manager parity
+- local update surfaces
+- platform packaging expectations
+
+### Deliverables
+
+- supported install flows for macOS, Linux, and Windows
+- documented update path
+- version/reporting surface aligned with supported packaging
+
+### Step Sequence
+
+1. install surface inventory from the live upstream repo
+2. script-based install path
+3. package manager integration path
+4. update/version reporting and docs
+
+### Verification Per Step
+
+- test the changed install or update path in the narrowest realistic environment
+- verify version output and docs stay aligned after packaging changes
+- keep install docs explicit about supported and unsupported platforms
+
+### Exit Criteria
+
+- a new user can install Klaude Kode through supported flows without reading the
+  source
+- update behavior is documented and tested for supported packaging paths
+
+## 12. Rollout Gates
 
 Progress to the next phase only when:
 
@@ -374,11 +417,13 @@ Progress to the next phase only when:
 - rollback path is documented
 - the phase-ending step has been committed and pushed
 
-## 12. Migration Guardrails
+## 13. Migration Guardrails
 
 - keep storage roots separate until final cutover
 - never rewrite current Claude Code configs in place
 - do not move remote workflows before local parity is proven
 - do not move MCP before builtin tool runtime is stable
 - do not move TS shell logic deeper into Go until event contracts settle
+- do not use the extracted source as the default parity reference when the live
+  upstream repo already answers the question
 - do not treat local verification without commit/push as a completed step
