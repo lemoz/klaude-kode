@@ -21,5 +21,7 @@ cleanup
   npm run smoke:permissions
   npm run smoke:oauth
   npm run smoke:anthropic
+  npm run smoke:profiles
+  npm run smoke:models
   npm run smoke:openrouter
 )

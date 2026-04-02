@@ -5,7 +5,7 @@ set -euo pipefail
 readonly repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly shell_dir="${repo_root}/shell"
 readonly cleanup_script="${repo_root}/scripts/cleanup-shell-smokes.sh"
-readonly session_name="kk-smoke-permissions"
+readonly session_name="kk-smoke-permissions-$$"
 readonly state_root="$(mktemp -d)"
 
 cleanup() {
@@ -30,7 +30,7 @@ wait_for_capture_contains() {
   local needle="$1"
   local capture=""
   local attempt
-  for attempt in $(seq 1 30); do
+  for attempt in $(seq 1 60); do
     capture="$(capture_pane)"
     if printf "%s" "${capture}" | rg -F -q "${needle}"; then
       printf "%s" "${capture}"

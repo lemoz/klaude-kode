@@ -5,7 +5,7 @@ set -euo pipefail
 readonly repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly shell_dir="${repo_root}/shell"
 readonly cleanup_script="${repo_root}/scripts/cleanup-shell-smokes.sh"
-readonly session_name="kk-smoke-openrouter"
+readonly session_name="kk-smoke-openrouter-$$"
 readonly state_root="$(mktemp -d)"
 readonly server_log="$(mktemp)"
 server_pid=""
@@ -37,7 +37,7 @@ wait_for_capture_contains() {
   local needle="$1"
   local capture=""
   local attempt
-  for attempt in $(seq 1 40); do
+  for attempt in $(seq 1 60); do
     capture="$(capture_pane)"
     if printf "%s" "${capture}" | rg -F -q "${needle}"; then
       printf "%s" "${capture}"
@@ -123,8 +123,8 @@ wait_for_capture_contains "enter a prompt or /help" >/dev/null
 
 tmux send-keys -t "${session_name}" "/login openrouter OPENROUTER_SMOKE_KEY model=openrouter/auto api_base=http://127.0.0.1:${api_port}" Enter
 
-login_capture="$(wait_for_capture_contains "profile=openrouter-main provider=openrouter auth=configured model=openrouter/auto")"
-assert_contains "${login_capture}" "profile=openrouter-main provider=openrouter auth=configured model=openrouter/auto"
+login_capture="$(wait_for_capture_contains "profile=openrouter-main provider=openrouter auth=configured method=openrouter_api_key model=openrouter/auto")"
+assert_contains "${login_capture}" "profile=openrouter-main provider=openrouter auth=configured method=openrouter_api_key model=openrouter/auto"
 assert_contains "${login_capture}" "surface=profiles status=active"
 assert_contains "${login_capture}" "openrouter-main (active) (openrouter/openrouter_api_key)"
 

@@ -5,7 +5,7 @@ set -euo pipefail
 readonly repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly shell_dir="${repo_root}/shell"
 readonly cleanup_script="${repo_root}/scripts/cleanup-shell-smokes.sh"
-readonly session_name="kk-smoke-models"
+readonly session_name="kk-smoke-models-$$"
 readonly state_root="$(mktemp -d)"
 
 cleanup() {
@@ -30,7 +30,7 @@ wait_for_capture_contains() {
   local needle="$1"
   local capture=""
   local attempt
-  for attempt in $(seq 1 40); do
+  for attempt in $(seq 1 60); do
     capture="$(capture_pane)"
     if printf "%s" "${capture}" | rg -F -q "${needle}"; then
       printf "%s" "${capture}"
@@ -51,7 +51,7 @@ tmux new-session -d -x 200 -y 60 -s "${session_name}" \
 wait_for_capture_contains "enter a prompt or /help" >/dev/null
 
 tmux send-keys -t "${session_name}" "/models anthropic-main" Enter
-catalog_capture="$(wait_for_capture_contains "Model Catalog")"
+catalog_capture="$(wait_for_capture_contains "profile: anthropic-main")"
 assert_contains "${catalog_capture}" "Model Catalog"
 assert_contains "${catalog_capture}" "profile: anthropic-main"
 assert_contains "${catalog_capture}" "available: claude-sonnet-4-6 (current), claude-opus-4-6"
