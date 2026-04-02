@@ -11,6 +11,7 @@
     "smoke:oauth": "../scripts/smoke-shell-oauth.sh",
     "smoke:openrouter": "../scripts/smoke-shell-openrouter.sh",
     "smoke:permissions": "../scripts/smoke-shell-permissions.sh",
+    "smoke:shell": "../scripts/smoke-shell-suite.sh",
     "smoke:tmux": "../scripts/smoke-shell-ui.sh"
   },
   "dependencies": {
