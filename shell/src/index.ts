@@ -369,6 +369,10 @@ async function handleShellInputLine(
   if (slashCommand?.kind === "setting") {
     ui.setActiveSurface("conversation");
     ui.setArtifactView(null);
+    if (slashCommand.key === "model") {
+      const profileID = ui.currentState()?.profile_id || config.profileId || "anthropic-main";
+      await validateModelSelection(config, profileID, slashCommand.value);
+    }
     const decisionVersion = ui.decisionVersion();
     await session.sendCommand(makeUpdateSessionSettingCommand(slashCommand.key, slashCommand.value));
     await ui.waitForDecision(decisionVersion);
@@ -644,6 +648,33 @@ function parseArgs(args: string[]) {
   }
 
   return config;
+}
+
+async function validateModelSelection(
+  config: Pick<ShellConfig, "stateRoot">,
+  profileID: string,
+  model: string,
+): Promise<void> {
+  const normalizedProfileID = profileID.trim();
+  const normalizedModel = model.trim();
+  if (normalizedProfileID === "" || normalizedModel === "") {
+    return;
+  }
+
+  const profiles = await listProfiles(config);
+  const activeProfile = profiles.find((entry) => entry.profile.id === normalizedProfileID);
+  if (!activeProfile) {
+    return;
+  }
+
+  if (activeProfile.models.includes(normalizedModel)) {
+    return;
+  }
+  if (activeProfile.profile.provider === "openrouter") {
+    return;
+  }
+
+  throw new Error(`model "${normalizedModel}" is not available for provider ${activeProfile.profile.provider}`);
 }
 
 function createRenderer(rawEvents: boolean) {
