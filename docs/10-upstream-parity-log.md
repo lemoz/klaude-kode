@@ -144,3 +144,36 @@ Local status: `partial`.
 
 - Manifest metadata and contribution discovery now cover the public upstream plugin layout more directly.
 - Hook directory loading, marketplace ingestion, and engine-emitted plugin inventory/status events are still not started.
+
+## 2026-04-06
+
+### Plugin Root Validation and Hook Directory Recognition
+
+Reviewed upstream sources:
+
+- [upstream README](https://raw.githubusercontent.com/anthropics/claude-code/main/README.md)
+- [upstream CHANGELOG](https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md)
+- [upstream plugins README](https://raw.githubusercontent.com/anthropics/claude-code/main/plugins/README.md)
+- [upstream marketplace manifest](https://raw.githubusercontent.com/anthropics/claude-code/main/.claude-plugin/marketplace.json)
+- [upstream examples directory](https://github.com/anthropics/claude-code/tree/main/examples)
+- [upstream scripts directory](https://github.com/anthropics/claude-code/tree/main/scripts)
+- [Issue #9297: marketplace add hangs and validation catches malformed plugin manifest data](https://github.com/anthropics/claude-code/issues/9297)
+- [Issue #9641: plugin manager misses installed plugins despite valid on-disk layout](https://github.com/anthropics/claude-code/issues/9641)
+
+Key findings:
+
+- The public upstream plugin docs treat `README.md` as part of the standard plugin root alongside `.claude-plugin/plugin.json`.
+- The public plugin layout includes optional `hooks/`, so local discovery should recognize that directory as part of the typed plugin surface even before hook execution is wired through the loader.
+- Recent upstream plugin issues show that validation quality and filesystem discovery accuracy are user-visible because `/plugin` flows depend on trustworthy on-disk structure, not shell-only assumptions.
+- The upstream examples and scripts trees reinforce that plugin-related UX now spans docs, examples, validation, and install surfaces rather than being an internal-only implementation detail.
+
+Local change:
+
+- Klaude Kode plugin inspection now requires a root `README.md` file and records typed validation issues when it is missing.
+- Plugin inspection now recognizes `hooks/` as a first-class plugin contribution root and counts discovered hook files for status projection.
+- Malformed plugin contribution layouts such as nested `commands/` directories, non-markdown `agents/` entries, directory-shaped `.mcp.json`, or file-shaped `hooks/`/`skills/` paths now surface as typed validation issues instead of only failing later during loader work.
+
+Local status: `partial`.
+
+- Root validation and hook-directory recognition now better match the upstream plugin packaging contract.
+- Engine-emitted plugin inventory events, marketplace ingestion, and full hook manifest loading are still not started.

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/cdossman/klaude-kode/internal/contracts"
 )
@@ -18,6 +19,8 @@ const MCPConfigRelativePath = ".mcp.json"
 const (
 	commandsDirName = "commands"
 	agentsDirName   = "agents"
+	hooksDirName    = "hooks"
+	readmeFileName  = "README.md"
 	skillsDirName   = "skills"
 	skillFileName   = "SKILL.md"
 )
@@ -41,12 +44,15 @@ type Manifest struct {
 }
 
 type Descriptor struct {
-	Root         string   `json:"root"`
-	Manifest     Manifest `json:"manifest"`
-	Commands     []string `json:"commands,omitempty"`
-	Agents       []string `json:"agents,omitempty"`
-	Skills       []string `json:"skills,omitempty"`
-	HasMCPConfig bool     `json:"has_mcp_config"`
+	Root             string            `json:"root"`
+	Manifest         Manifest          `json:"manifest"`
+	Commands         []string          `json:"commands,omitempty"`
+	Agents           []string          `json:"agents,omitempty"`
+	Skills           []string          `json:"skills,omitempty"`
+	HookCount        int               `json:"hook_count"`
+	HasREADME        bool              `json:"has_readme"`
+	HasMCPConfig     bool              `json:"has_mcp_config"`
+	ValidationIssues []ValidationIssue `json:"validation_issues,omitempty"`
 }
 
 type ValidationIssue struct {
@@ -81,38 +87,59 @@ func Inspect(root string) (Descriptor, error) {
 		return Descriptor{}, err
 	}
 
-	commands, err := listMarkdownBasenames(filepath.Join(root, commandsDirName))
+	commands, commandIssues, err := listMarkdownBasenames(filepath.Join(root, commandsDirName), commandsDirName)
 	if err != nil {
 		return Descriptor{}, fmt.Errorf("list commands: %w", err)
 	}
 
-	agents, err := listMarkdownBasenames(filepath.Join(root, agentsDirName))
+	agents, agentIssues, err := listMarkdownBasenames(filepath.Join(root, agentsDirName), agentsDirName)
 	if err != nil {
 		return Descriptor{}, fmt.Errorf("list agents: %w", err)
 	}
 
-	skills, err := listSkills(filepath.Join(root, skillsDirName))
+	skills, skillIssues, err := listSkills(filepath.Join(root, skillsDirName))
 	if err != nil {
 		return Descriptor{}, fmt.Errorf("list skills: %w", err)
 	}
 
-	hasMCPConfig, err := fileExists(filepath.Join(root, MCPConfigRelativePath))
+	hasReadme, readmeIssues, err := inspectRequiredFile(filepath.Join(root, readmeFileName), readmeFileName, true)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("check readme: %w", err)
+	}
+
+	hookCount, hookIssues, err := countHookFiles(filepath.Join(root, hooksDirName))
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("inspect hooks: %w", err)
+	}
+
+	hasMCPConfig, mcpIssues, err := inspectRequiredFile(filepath.Join(root, MCPConfigRelativePath), MCPConfigRelativePath, false)
 	if err != nil {
 		return Descriptor{}, fmt.Errorf("check mcp config: %w", err)
 	}
 
+	issues := make([]ValidationIssue, 0, len(commandIssues)+len(agentIssues)+len(skillIssues)+len(readmeIssues)+len(hookIssues)+len(mcpIssues))
+	issues = append(issues, commandIssues...)
+	issues = append(issues, agentIssues...)
+	issues = append(issues, skillIssues...)
+	issues = append(issues, readmeIssues...)
+	issues = append(issues, hookIssues...)
+	issues = append(issues, mcpIssues...)
+
 	return Descriptor{
-		Root:         root,
-		Manifest:     manifest,
-		Commands:     commands,
-		Agents:       agents,
-		Skills:       skills,
-		HasMCPConfig: hasMCPConfig,
+		Root:             root,
+		Manifest:         manifest,
+		Commands:         commands,
+		Agents:           agents,
+		Skills:           skills,
+		HookCount:        hookCount,
+		HasREADME:        hasReadme,
+		HasMCPConfig:     hasMCPConfig,
+		ValidationIssues: issues,
 	}, nil
 }
 
 func (d Descriptor) StatusPayload(pluginID string) contracts.PluginStatusPayload {
-	issues := ValidateManifest(d.Manifest)
+	issues := ValidateDescriptor(d)
 	status := contracts.PluginStatusPayload{
 		PluginID:   pluginID,
 		Name:       d.Manifest.Name,
@@ -122,7 +149,7 @@ func (d Descriptor) StatusPayload(pluginID string) contracts.PluginStatusPayload
 		Commands:   append([]string(nil), d.Commands...),
 		Agents:     append([]string(nil), d.Agents...),
 		Skills:     append([]string(nil), d.Skills...),
-		HookCount:  0,
+		HookCount:  d.HookCount,
 		MCPServers: 0,
 	}
 	if status.PluginID == "" {
@@ -135,6 +162,13 @@ func (d Descriptor) StatusPayload(pluginID string) contracts.PluginStatusPayload
 		status.Error = summarizeIssues(issues)
 	}
 	return status
+}
+
+func ValidateDescriptor(descriptor Descriptor) []ValidationIssue {
+	issues := make([]ValidationIssue, 0, len(descriptor.ValidationIssues)+5)
+	issues = append(issues, ValidateManifest(descriptor.Manifest)...)
+	issues = append(issues, descriptor.ValidationIssues...)
+	return issues
 }
 
 func ValidateManifest(manifest Manifest) []ValidationIssue {
@@ -198,40 +232,68 @@ func ValidateManifest(manifest Manifest) []ValidationIssue {
 	return issues
 }
 
-func listMarkdownBasenames(dir string) ([]string, error) {
+func listMarkdownBasenames(dir string, field string) ([]string, []ValidationIssue, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		if isNotDir(err) {
+			return nil, []ValidationIssue{{
+				Field:   field,
+				Message: fmt.Sprintf("%s must be a directory", field),
+			}}, nil
+		}
+		return nil, nil, err
 	}
 
 	names := make([]string, 0, len(entries))
+	issues := make([]ValidationIssue, 0)
 	for _, entry := range entries {
 		if entry.IsDir() {
+			issues = append(issues, ValidationIssue{
+				Field:   filepath.ToSlash(filepath.Join(field, entry.Name())),
+				Message: "nested directories are not supported here",
+			})
 			continue
 		}
 		name := entry.Name()
 		if filepath.Ext(name) != ".md" {
+			issues = append(issues, ValidationIssue{
+				Field:   filepath.ToSlash(filepath.Join(field, name)),
+				Message: "expected a markdown file",
+			})
 			continue
 		}
 		names = append(names, strings.TrimSuffix(name, filepath.Ext(name)))
 	}
 	sort.Strings(names)
-	return names, nil
+	return names, issues, nil
 }
 
-func listSkills(root string) ([]string, error) {
+func listSkills(root string) ([]string, []ValidationIssue, error) {
 	skills := make([]string, 0)
-	if _, err := os.Stat(root); err != nil {
+	info, err := os.Stat(root)
+	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		if isNotDir(err) {
+			return nil, []ValidationIssue{{
+				Field:   skillsDirName,
+				Message: "skills must be a directory",
+			}}, nil
+		}
+		return nil, nil, err
+	}
+	if !info.IsDir() {
+		return nil, []ValidationIssue{{
+			Field:   skillsDirName,
+			Message: "skills must be a directory",
+		}}, nil
 	}
 
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -246,22 +308,80 @@ func listSkills(root string) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sort.Strings(skills)
-	return skills, nil
+	return skills, nil, nil
 }
 
-func fileExists(path string) (bool, error) {
-	_, err := os.Stat(path)
+func countHookFiles(dir string) (int, []ValidationIssue, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil, nil
+		}
+		if isNotDir(err) {
+			return 0, []ValidationIssue{{
+				Field:   hooksDirName,
+				Message: "hooks must be a directory",
+			}}, nil
+		}
+		return 0, nil, err
+	}
+	if !info.IsDir() {
+		return 0, []ValidationIssue{{
+			Field:   hooksDirName,
+			Message: "hooks must be a directory",
+		}}, nil
+	}
+
+	count := 0
+	err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		count++
+		return nil
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return count, nil, nil
+}
+
+func inspectRequiredFile(path string, field string, required bool) (bool, []ValidationIssue, error) {
+	info, err := os.Stat(path)
 	if err == nil {
-		return true, nil
+		if info.IsDir() {
+			return false, []ValidationIssue{{
+				Field:   field,
+				Message: fmt.Sprintf("%s must be a file", field),
+			}}, nil
+		}
+		return true, nil, nil
 	}
 	if os.IsNotExist(err) {
-		return false, nil
+		if !required {
+			return false, nil, nil
+		}
+		return false, []ValidationIssue{{
+			Field:   field,
+			Message: fmt.Sprintf("%s is required", field),
+		}}, nil
 	}
-	return false, err
+	return false, nil, err
+}
+
+func isNotDir(err error) bool {
+	pathErr, ok := err.(*os.PathError)
+	if !ok {
+		return false
+	}
+	return pathErr.Err == syscall.ENOTDIR
 }
 
 func summarizeIssues(issues []ValidationIssue) string {

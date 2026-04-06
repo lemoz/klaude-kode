@@ -103,6 +103,9 @@ func TestInspectDiscoversPluginContributions(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), data, 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# Example plugin\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for README.md: %v", err)
+	}
 
 	for _, relativePath := range []string{
 		filepath.Join("commands", "review.md"),
@@ -110,6 +113,8 @@ func TestInspectDiscoversPluginContributions(t *testing.T) {
 		filepath.Join("agents", "frontend.md"),
 		filepath.Join("skills", "deploy", "SKILL.md"),
 		filepath.Join("skills", "ops", "incident", "SKILL.md"),
+		filepath.Join("hooks", "session-start.sh"),
+		filepath.Join("hooks", "post-tool", "notify.py"),
 		".mcp.json",
 	} {
 		fullPath := filepath.Join(root, relativePath)
@@ -144,6 +149,14 @@ func TestInspectDiscoversPluginContributions(t *testing.T) {
 		}
 	}
 
+	if !descriptor.HasREADME {
+		t.Fatalf("expected descriptor to report README.md")
+	}
+
+	if descriptor.HookCount != 2 {
+		t.Fatalf("expected descriptor to report 2 hook files, got %#v", descriptor)
+	}
+
 	if !descriptor.HasMCPConfig {
 		t.Fatalf("expected descriptor to report .mcp.json")
 	}
@@ -155,8 +168,8 @@ func TestInspectDiscoversPluginContributions(t *testing.T) {
 	if status.PluginID != "example-plugin" || status.Version != "1.2.3" {
 		t.Fatalf("expected plugin identity in status, got %#v", status)
 	}
-	if len(status.Skills) != 2 || status.MCPServers != 1 {
-		t.Fatalf("expected skills and mcp projection in status, got %#v", status)
+	if len(status.Skills) != 2 || status.MCPServers != 1 || status.HookCount != 2 {
+		t.Fatalf("expected skills, hooks, and mcp projection in status, got %#v", status)
 	}
 }
 
@@ -180,5 +193,49 @@ func TestDescriptorStatusPayloadCarriesValidationErrors(t *testing.T) {
 	}
 	if status.Error == "" {
 		t.Fatalf("expected validation summary in error field, got %#v", status)
+	}
+}
+
+func TestInspectReportsMissingReadmeAndMalformedContributionLayout(t *testing.T) {
+	root := t.TempDir()
+	manifestDir := filepath.Join(root, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+
+	data := []byte(`{"name":"example-plugin","description":"Example Claude Code plugin","version":"1.2.3","author":{"name":"Anthropic","email":"support@anthropic.com"}}`)
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), data, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, "commands", "nested"), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error for nested command: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error for agents: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "agents", "oops.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for invalid agent file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "hooks"), []byte("not-a-dir"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for hooks: %v", err)
+	}
+
+	descriptor, err := Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect returned error: %v", err)
+	}
+
+	issues := ValidateDescriptor(descriptor)
+	if len(issues) != 4 {
+		t.Fatalf("expected 4 validation issues, got %#v", issues)
+	}
+
+	status := descriptor.StatusPayload("")
+	if status.Valid || status.Loaded {
+		t.Fatalf("expected invalid unloaded status, got %#v", status)
+	}
+	if status.Error == "" {
+		t.Fatalf("expected status error summary, got %#v", status)
 	}
 }

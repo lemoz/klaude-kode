@@ -75,6 +75,10 @@ blueprint-only state. The current implementation supports:
   - Anthropic API-key login and live provider turns
   - OpenRouter API-key login, custom-model support, and live provider turns
   - capability-mismatch handling and provider/profile/model smoke coverage
+- an in-progress Phase 4 plugin baseline with:
+  - typed plugin manifest parsing and contribution discovery
+  - root validation for `README.md`, `hooks/`, and malformed contribution
+    layouts before loader work begins
 - live provider-backed CLI and shell turns
 - replay-pack export
 - candidate validation

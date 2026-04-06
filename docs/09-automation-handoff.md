@@ -1,5 +1,23 @@
 # Automation Handoff
 
+## 2026-04-06
+
+- Completed unit: Phase 4 plugin root validation for `README.md`, `hooks/`, and malformed contribution layouts.
+- Why chosen: after the manifest/discovery baseline, this was the next smallest safe plugin step that hardens marketplace-facing plugin intake before any loader/runtime wiring and keeps validation in the Go layer.
+- Files changed: `README.md`, `docs/05-roadmap.md`, `docs/09-automation-handoff.md`, `docs/10-upstream-parity-log.md`, `internal/plugin/manifest.go`, `internal/plugin/manifest_test.go`.
+- Verification run:
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./internal/plugin ./internal/contracts`
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./internal/plugin -run 'TestInspectDiscoversPluginContributions|TestInspectReportsMissingReadmeAndMalformedContributionLayout'`
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth`, `internal/engine`, and `internal/provider` because this sandbox denies binding `[::1]:0`.
+  - `printf '{"kind":"close_session","payload":{"reason":"plugin_root_smoke_complete"}}\n' | GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go run ./cmd/cc-engine -transport=stdio -format=events -session-id=kk-smoke-plugin-root -state-root="$state_root" -cwd=/Users/cdossman/.codex/worktrees/1f2c/klaude-kode`
+- Commit hash: not created in this run because the sandbox denied writes to `/Users/cdossman/klaude-kode/.git/worktrees/klaude-kode4/index.lock` during `git commit`.
+- Push status: blocked because commit creation was blocked by the sandboxed worktree git-dir write restriction.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this plugin validation change, and commit/push are blocked in this run by the sandbox denying worktree git index writes.
+- Next 3 recommended atomic units:
+  - Add hook-directory discovery details to plugin status so the engine can project hook inventory, not just count files.
+  - Add a small engine-owned plugin inventory command or event path that emits the validated plugin status payload for the shell.
+  - Start marketplace manifest ingestion so plugin/category metadata can drive later `/plugin` flows without shell-owned parsing.
+
 ## 2026-04-05
 
 - Completed unit: Phase 4 plugin manifest contract hardening with filesystem-backed contribution discovery and canonical plugin status projection.

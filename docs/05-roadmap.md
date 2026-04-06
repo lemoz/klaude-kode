@@ -55,7 +55,7 @@ Status snapshot as of `2026-04-02`:
 | Phase 1: Headless Core | `complete` | Go engine, persistence, replay/resume, CLI modes, and provider boundary are in place |
 | Phase 2: Thin TS Shell | `complete` | interactive Ink shell, auth/profile/model/help/report surfaces, and shell smoke gates are green |
 | Phase 3: Provider Expansion | `complete` | Anthropic OAuth/API-key and OpenRouter API-key flows, capability handling, and provider smoke gates are green |
-| Phase 4: Plugins, Hooks, MCP, and Marketplace Surfaces | `next` | next execution phase |
+| Phase 4: Plugins, Hooks, MCP, and Marketplace Surfaces | `in_progress` | plugin manifest/discovery/root-validation baseline is in place; loader/runtime work remains |
 | Phase 5: Remote and Detached Sessions | `not_started` | depends on Phase 4 and stronger local parity surfaces |
 | Phase 6: Harness Surface and Offline Evaluation | `complete_baseline` | replay/benchmark/export/report baseline is implemented and usable |
 | Phase 7: Cutover and Import | `not_started` | import and coexistence work remains ahead |
@@ -303,6 +303,14 @@ Do not require:
 - hook and plugin behavior is not TS-runtime-dependent
 - plugin and marketplace-facing behavior are driven by typed manifests rather
   than shell ad hoc logic
+
+### Current Status
+
+- `in_progress` as of `2026-04-06`
+- completed atomic units so far:
+  - plugin manifest contract hardening with contribution discovery
+  - plugin root validation for `README.md`, `hooks/`, and malformed
+    contribution layouts
 
 ## 9. Phase 5: Remote and Detached Sessions
 
