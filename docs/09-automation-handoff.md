@@ -1,5 +1,21 @@
 # Automation Handoff
 
+## 2026-04-05
+
+- Completed unit: Phase 4 plugin manifest contract hardening with filesystem-backed contribution discovery and canonical plugin status projection.
+- Why chosen: Phase 2 and Phase 3 are already closed, and this was the smallest meaningful Phase 4 step that aligns with the live upstream plugin surface without pulling runtime ownership back into the shell.
+- Files changed: `internal/plugin/manifest.go`, `internal/plugin/manifest_test.go`, `internal/contracts/types.go`, `internal/contracts/types_test.go`, `docs/09-automation-handoff.md`, `docs/10-upstream-parity-log.md`.
+- Verification run:
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./internal/plugin ./internal/contracts`
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth`, `internal/engine`, and `internal/provider` because this sandbox denies binding `[::1]:0`.
+- Commit hash: pending at authoring time; recorded in automation memory and git history after commit.
+- Push status: pending at authoring time; recorded in automation memory and git history after push.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this plugin contract change.
+- Next 3 recommended atomic units:
+  - Add hook-directory discovery and typed hook status projection alongside the existing hook runner.
+  - Add plugin root validation for `README.md`, `hooks/`, and malformed contribution layouts before loader work begins.
+  - Add a small engine-owned plugin inventory command or event path that emits the new manifest/status projection for the shell.
+
 ## 2026-04-02
 
 - Completed unit: Phase 3 provider selection hardening so invalid `/model` changes are rejected before session state mutates.

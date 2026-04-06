@@ -25,10 +25,12 @@ func TestSessionEventMarshalsHookAndPluginPayloads(t *testing.T) {
 			Plugin: &PluginStatusPayload{
 				PluginID:   "example-plugin",
 				Name:       "Example Plugin",
+				Version:    "1.2.0",
 				Loaded:     true,
 				Valid:      true,
 				Commands:   []string{"review"},
 				Agents:     []string{"frontend"},
+				Skills:     []string{"deploy"},
 				HookCount:  2,
 				MCPServers: 1,
 			},
@@ -51,5 +53,9 @@ func TestSessionEventMarshalsHookAndPluginPayloads(t *testing.T) {
 
 	if decoded.Payload.Plugin == nil || decoded.Payload.Plugin.PluginID != "example-plugin" {
 		t.Fatalf("expected plugin payload to survive round-trip, got %#v", decoded.Payload.Plugin)
+	}
+
+	if decoded.Payload.Plugin.Version != "1.2.0" || len(decoded.Payload.Plugin.Skills) != 1 || decoded.Payload.Plugin.Skills[0] != "deploy" {
+		t.Fatalf("expected plugin metadata to survive round-trip, got %#v", decoded.Payload.Plugin)
 	}
 }

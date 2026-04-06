@@ -114,3 +114,33 @@ Next recommended atomic units:
 1. add plugin manifest contracts and validation helpers
 2. add hook event contracts and hook status surfaces
 3. add engine-owned MCP lifecycle and status events before tool projection
+
+## 2026-04-05
+
+### Plugin Manifest Contracts and Status Projection
+
+Reviewed upstream sources:
+
+- [upstream README](https://raw.githubusercontent.com/anthropics/claude-code/main/README.md)
+- [upstream plugins README](https://raw.githubusercontent.com/anthropics/claude-code/main/plugins/README.md)
+- [upstream marketplace manifest](https://raw.githubusercontent.com/anthropics/claude-code/main/.claude-plugin/marketplace.json)
+- [Issue #9641: plugin manager misses installed plugins](https://github.com/anthropics/claude-code/issues/9641)
+- [Issue #9297: marketplace install/discovery hangs](https://github.com/anthropics/claude-code/issues/9297)
+
+Key findings:
+
+- The live upstream README now treats plugins as a first-class public feature of Claude Code.
+- The upstream `plugins/README.md` describes a standard plugin layout with `.claude-plugin/plugin.json`, optional `commands/`, `agents/`, `skills/`, `hooks/`, and `.mcp.json`.
+- The bundled upstream marketplace manifest carries per-plugin metadata such as `name`, `description`, `version`, `author`, `source`, and `category`.
+- Recent plugin issues indicate that manifest completeness and discovery accuracy matter to the user-visible `/plugin` workflow, so local contracts should preserve versioned metadata and contribution inventory instead of deferring everything to ad hoc shell logic.
+
+Local change:
+
+- Klaude Kode now requires plugin `version` metadata in the local manifest contract.
+- The plugin package can inspect a plugin root for `commands/`, `agents/`, `skills/`, and `.mcp.json` and project that into the canonical `plugin_status` payload.
+- The canonical plugin status payload now carries `version` and `skills` alongside commands, agents, and MCP presence so later engine and shell work can stay projection-only.
+
+Local status: `partial`.
+
+- Manifest metadata and contribution discovery now cover the public upstream plugin layout more directly.
+- Hook directory loading, marketplace ingestion, and engine-emitted plugin inventory/status events are still not started.

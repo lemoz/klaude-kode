@@ -63,8 +63,8 @@ const (
 	EventKindToolCallCompleted   EventKind = "tool_call_completed"
 	EventKindPermissionRequested EventKind = "permission_requested"
 	EventKindPermissionResolved  EventKind = "permission_resolved"
-	EventKindHookLifecycle      EventKind = "hook_lifecycle"
-	EventKindPluginStatus       EventKind = "plugin_status"
+	EventKindHookLifecycle       EventKind = "hook_lifecycle"
+	EventKindPluginStatus        EventKind = "plugin_status"
 	EventKindSessionState        EventKind = "session_state"
 	EventKindWarning             EventKind = "warning"
 	EventKindFailure             EventKind = "failure"
@@ -253,11 +253,13 @@ type HookEventPayload struct {
 type PluginStatusPayload struct {
 	PluginID   string   `json:"plugin_id"`
 	Name       string   `json:"name"`
+	Version    string   `json:"version"`
 	Loaded     bool     `json:"loaded"`
 	Valid      bool     `json:"valid"`
 	Error      string   `json:"error"`
 	Commands   []string `json:"commands"`
 	Agents     []string `json:"agents"`
+	Skills     []string `json:"skills"`
 	HookCount  int      `json:"hook_count"`
 	MCPServers int      `json:"mcp_servers"`
 }
