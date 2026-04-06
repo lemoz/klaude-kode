@@ -10,9 +10,9 @@
   - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./internal/plugin -run 'TestInspectDiscoversPluginContributions|TestInspectReportsMissingReadmeAndMalformedContributionLayout'`
   - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth`, `internal/engine`, and `internal/provider` because this sandbox denies binding `[::1]:0`.
   - `printf '{"kind":"close_session","payload":{"reason":"plugin_root_smoke_complete"}}\n' | GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go run ./cmd/cc-engine -transport=stdio -format=events -session-id=kk-smoke-plugin-root -state-root="$state_root" -cwd=/Users/cdossman/.codex/worktrees/1f2c/klaude-kode`
-- Commit hash: not created in this run because the sandbox denied writes to `/Users/cdossman/klaude-kode/.git/worktrees/klaude-kode4/index.lock` during `git commit`.
-- Push status: blocked because commit creation was blocked by the sandboxed worktree git-dir write restriction.
-- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this plugin validation change, and commit/push are blocked in this run by the sandbox denying worktree git index writes.
+- Commit hash: `5e11b8c5118972cbd1584569ac368d5c75b2adb9` (`phase4: validate plugin roots`).
+- Push status: pushed successfully to `origin/main`.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this plugin validation change.
 - Next 3 recommended atomic units:
   - Add hook-directory discovery details to plugin status so the engine can project hook inventory, not just count files.
   - Add a small engine-owned plugin inventory command or event path that emits the validated plugin status payload for the shell.
