@@ -9,9 +9,9 @@
   - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./cmd/cc-engine ./cmd/cc ./internal/plugin ./internal/contracts`
   - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth`, `internal/engine`, and `internal/provider` because this sandbox denies binding `[::1]:0`.
   - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go run ./cmd/cc-engine -format=json -inspect-plugin -cwd="$tmpdir"` against a temporary plugin root with manifest, commands, agents, skills, hooks, `README.md`, and `.mcp.json`.
-- Commit hash: not created; `git commit` was blocked when the sandbox denied writes to `/Users/cdossman/klaude-kode/.git/worktrees/klaude-kode5/index.lock`.
-- Push status: not attempted because the sandbox blocked the required commit step first.
-- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this plugin inspection change, and this worktree cannot create git index locks under the parent repo metadata path in the current sandbox.
+- Commit hash: `2903c8d6a0dd3524ea7b62ab309d4d243aa8ab4c` (`phase4: add plugin inspection surface`).
+- Push status: pushed successfully to `origin/main`.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this plugin inspection change.
 - Next 3 recommended atomic units:
   - Add engine-emitted plugin inventory events so shells can request or receive plugin status without direct filesystem inspection.
   - Start marketplace manifest ingestion so category/source metadata can feed later `/plugin` install and browse flows.
