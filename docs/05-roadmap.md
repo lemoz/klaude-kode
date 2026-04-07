@@ -306,11 +306,13 @@ Do not require:
 
 ### Current Status
 
-- `in_progress` as of `2026-04-06`
+- `in_progress` as of `2026-04-07`
 - completed atomic units so far:
   - plugin manifest contract hardening with contribution discovery
   - plugin root validation for `README.md`, `hooks/`, and malformed
     contribution layouts
+  - engine-owned plugin inspection and canonical status rendering in `cc` and
+    `cc-engine`
 
 ## 9. Phase 5: Remote and Detached Sessions
 

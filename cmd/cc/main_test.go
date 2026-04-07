@@ -216,6 +216,35 @@ func TestRunStatusText(t *testing.T) {
 	}
 }
 
+func TestRunInspectPluginText(t *testing.T) {
+	root := createPluginRoot(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-inspect-plugin",
+		"-cwd=" + root,
+		"-state-root=" + filepath.Join(t.TempDir(), "state-root"),
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("inspect plugin run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc plugin inspection") {
+		t.Fatalf("expected plugin inspection header, got %q", output)
+	}
+	if !strings.Contains(output, "plugin_id: example-plugin") {
+		t.Fatalf("expected plugin id in output, got %q", output)
+	}
+	if !strings.Contains(output, "hook_count: 2") {
+		t.Fatalf("expected hook count in output, got %q", output)
+	}
+	if !strings.Contains(output, "skills: deploy") {
+		t.Fatalf("expected skills in output, got %q", output)
+	}
+}
+
 func TestRunExportReplayPackText(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 	var stdout bytes.Buffer
@@ -703,6 +732,41 @@ func createValidCandidateRoot(t *testing.T) string {
 			t.Fatalf("WriteFile returned error: %v", err)
 		}
 	}
+	return root
+}
+
+func createPluginRoot(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	manifestDir := filepath.Join(root, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte(`{"name":"example-plugin","description":"Example Claude Code plugin","version":"1.2.3","author":{"name":"Anthropic","email":"support@anthropic.com"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for plugin manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# Example plugin\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for README.md: %v", err)
+	}
+
+	for _, relativePath := range []string{
+		filepath.Join("commands", "review.md"),
+		filepath.Join("agents", "frontend.md"),
+		filepath.Join("skills", "deploy", "SKILL.md"),
+		filepath.Join("hooks", "session-start.sh"),
+		filepath.Join("hooks", "post-tool", "notify.py"),
+		".mcp.json",
+	} {
+		fullPath := filepath.Join(root, relativePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("MkdirAll returned error for %s: %v", relativePath, err)
+		}
+		if err := os.WriteFile(fullPath, []byte("content"), 0o644); err != nil {
+			t.Fatalf("WriteFile returned error for %s: %v", relativePath, err)
+		}
+	}
+
 	return root
 }
 

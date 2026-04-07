@@ -228,6 +228,45 @@ func TestRunStatusJSON(t *testing.T) {
 	}
 }
 
+func TestRunInspectPluginJSON(t *testing.T) {
+	root := createPluginRoot(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-format=json",
+		"-inspect-plugin",
+		"-cwd=" + root,
+		"-state-root=" + filepath.Join(t.TempDir(), "state-root"),
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("inspect plugin run returned error: %v", err)
+	}
+
+	var got pluginInspectionResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse inspect plugin json output: %v", err)
+	}
+	if got.Engine != "cc-engine" {
+		t.Fatalf("expected engine cc-engine, got %q", got.Engine)
+	}
+	if got.Root != root {
+		t.Fatalf("expected root %q, got %q", root, got.Root)
+	}
+	if got.Status.PluginID != "example-plugin" || got.Status.Version != "1.2.3" {
+		t.Fatalf("expected plugin identity in status, got %#v", got.Status)
+	}
+	if !got.Status.Valid || !got.Status.Loaded {
+		t.Fatalf("expected valid loaded plugin status, got %#v", got.Status)
+	}
+	if got.Status.HookCount != 2 || got.Status.MCPServers != 1 {
+		t.Fatalf("expected hooks and mcp projection, got %#v", got.Status)
+	}
+	if len(got.Issues) != 0 {
+		t.Fatalf("expected no validation issues, got %#v", got.Issues)
+	}
+}
+
 func TestRunExportReplayPackJSON(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 	var stdout bytes.Buffer
@@ -933,6 +972,41 @@ func TestResumePersistedSession(t *testing.T) {
 	if len(got.Events) != 10 {
 		t.Fatalf("expected 10 replayed events, got %d", len(got.Events))
 	}
+}
+
+func createPluginRoot(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	manifestDir := filepath.Join(root, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte(`{"name":"example-plugin","description":"Example Claude Code plugin","version":"1.2.3","author":{"name":"Anthropic","email":"support@anthropic.com"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for plugin manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# Example plugin\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for README.md: %v", err)
+	}
+
+	for _, relativePath := range []string{
+		filepath.Join("commands", "review.md"),
+		filepath.Join("agents", "frontend.md"),
+		filepath.Join("skills", "deploy", "SKILL.md"),
+		filepath.Join("hooks", "session-start.sh"),
+		filepath.Join("hooks", "post-tool", "notify.py"),
+		".mcp.json",
+	} {
+		fullPath := filepath.Join(root, relativePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("MkdirAll returned error for %s: %v", relativePath, err)
+		}
+		if err := os.WriteFile(fullPath, []byte("content"), 0o644); err != nil {
+			t.Fatalf("WriteFile returned error for %s: %v", relativePath, err)
+		}
+	}
+
+	return root
 }
 
 func createValidCandidateRoot(t *testing.T) string {

@@ -177,3 +177,34 @@ Local status: `partial`.
 
 - Root validation and hook-directory recognition now better match the upstream plugin packaging contract.
 - Engine-emitted plugin inventory events, marketplace ingestion, and full hook manifest loading are still not started.
+
+## 2026-04-07
+
+### Engine-Owned Plugin Inspection Surface
+
+Reviewed upstream sources:
+
+- [upstream README](https://raw.githubusercontent.com/anthropics/claude-code/main/README.md)
+- [upstream CHANGELOG](https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md)
+- [upstream plugins README](https://raw.githubusercontent.com/anthropics/claude-code/main/plugins/README.md)
+- [upstream marketplace manifest](https://raw.githubusercontent.com/anthropics/claude-code/main/.claude-plugin/marketplace.json)
+- [Issue #9641: plugin manager misses installed plugins despite valid on-disk layout](https://github.com/anthropics/claude-code/issues/9641)
+- [Issue #10225: plugin UserPromptSubmit hooks are registered but never execute](https://github.com/anthropics/claude-code/issues/10225)
+- [Issue #10871: plugin-registered hooks are executed twice with different PIDs](https://github.com/anthropics/claude-code/issues/10871)
+
+Key findings:
+
+- The live upstream plugin surface is not just a packaging format; it depends on trustworthy runtime inspection so installed plugins, hook registrations, and contribution inventory are visible to user-facing plugin flows.
+- Recent upstream issues show two adjacent user-visible failure modes: plugin managers can miss valid installs, and plugin hook behavior can drift from the on-disk manifest state.
+- That makes a typed Go-side inspection surface a prerequisite for later loader and `/plugin` work, because the shell should render plugin state rather than rediscover filesystem facts independently.
+
+Local change:
+
+- Klaude Kode now exposes `-inspect-plugin` in both `cc-engine` and `cc`, using the existing typed plugin inspector and canonical `plugin_status` payload.
+- The new surface reports plugin identity, validity, contribution inventory, hook count, MCP presence, and detailed validation issues from the Go runtime.
+- README and roadmap status now document plugin inspection as a completed Phase 4 atomic unit.
+
+Local status: `partial`.
+
+- Plugin inspection and status rendering now exist as a concrete Go-owned parity surface.
+- Engine-emitted plugin inventory events, marketplace ingestion, and full hook manifest loading are still not started.

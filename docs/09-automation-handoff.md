@@ -1,5 +1,22 @@
 # Automation Handoff
 
+## 2026-04-07
+
+- Completed unit: Phase 4 engine-owned plugin inspection and canonical status rendering for `cc` and `cc-engine`.
+- Why chosen: after plugin root validation, the next smallest safe parity step was exposing the existing typed plugin status model through the Go runtime so future shell `/plugin` flows can stay projection-only instead of reparsing plugin roots.
+- Files changed: `README.md`, `cmd/cc-engine/main.go`, `cmd/cc-engine/main_test.go`, `cmd/cc/main.go`, `cmd/cc/main_test.go`, `docs/05-roadmap.md`, `docs/09-automation-handoff.md`, `docs/10-upstream-parity-log.md`.
+- Verification run:
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./cmd/cc-engine ./cmd/cc ./internal/plugin ./internal/contracts`
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth`, `internal/engine`, and `internal/provider` because this sandbox denies binding `[::1]:0`.
+  - `GOCACHE=/tmp/klaude-gocache GOMODCACHE=/tmp/klaude-gomodcache go run ./cmd/cc-engine -format=json -inspect-plugin -cwd="$tmpdir"` against a temporary plugin root with manifest, commands, agents, skills, hooks, `README.md`, and `.mcp.json`.
+- Commit hash: not created; `git commit` was blocked when the sandbox denied writes to `/Users/cdossman/klaude-kode/.git/worktrees/klaude-kode5/index.lock`.
+- Push status: not attempted because the sandbox blocked the required commit step first.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this plugin inspection change, and this worktree cannot create git index locks under the parent repo metadata path in the current sandbox.
+- Next 3 recommended atomic units:
+  - Add engine-emitted plugin inventory events so shells can request or receive plugin status without direct filesystem inspection.
+  - Start marketplace manifest ingestion so category/source metadata can feed later `/plugin` install and browse flows.
+  - Load typed hook manifests from plugin roots so hook inventory becomes structured behavior instead of count-only discovery.
+
 ## 2026-04-06
 
 - Completed unit: Phase 4 plugin root validation for `README.md`, `hooks/`, and malformed contribution layouts.

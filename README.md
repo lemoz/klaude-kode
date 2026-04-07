@@ -79,6 +79,8 @@ blueprint-only state. The current implementation supports:
   - typed plugin manifest parsing and contribution discovery
   - root validation for `README.md`, `hooks/`, and malformed contribution
     layouts before loader work begins
+  - engine-owned plugin inspection via `cc-engine -inspect-plugin` and
+    `cc -inspect-plugin`
 - live provider-backed CLI and shell turns
 - replay-pack export
 - candidate validation
@@ -153,6 +155,13 @@ Validate a candidate:
 ```bash
 go run ./cmd/cc-engine -validate-candidate -cwd=/path/to/candidate
 go run ./cmd/cc -validate-candidate -cwd=/path/to/candidate
+```
+
+Inspect a plugin root:
+
+```bash
+go run ./cmd/cc-engine -inspect-plugin -cwd=/path/to/plugin
+go run ./cmd/cc -inspect-plugin -cwd=/path/to/plugin
 ```
 
 Run replay and benchmark evals:

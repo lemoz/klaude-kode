@@ -15,6 +15,7 @@ import (
 	"github.com/cdossman/klaude-kode/internal/contracts"
 	"github.com/cdossman/klaude-kode/internal/engine"
 	"github.com/cdossman/klaude-kode/internal/harness"
+	"github.com/cdossman/klaude-kode/internal/plugin"
 	"github.com/cdossman/klaude-kode/internal/provider"
 	"github.com/cdossman/klaude-kode/internal/transport"
 )
@@ -33,6 +34,7 @@ type config struct {
 	ListProfiles        bool
 	ListModels          bool
 	ShowStatus          bool
+	InspectPlugin       bool
 	ExportReplayPack    bool
 	ValidateCandidate   bool
 	RunReplayEval       bool
@@ -95,6 +97,13 @@ type sessionStatusResult struct {
 	Summary contracts.SessionSummary `json:"summary"`
 }
 
+type pluginInspectionResult struct {
+	Engine string                        `json:"engine"`
+	Root   string                        `json:"root"`
+	Status contracts.PluginStatusPayload `json:"status"`
+	Issues []plugin.ValidationIssue      `json:"validation_issues,omitempty"`
+}
+
 var performAnthropicOAuthLogin = anthropicoauth.PerformLogin
 
 func main() {
@@ -138,6 +147,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 			return fmt.Errorf("-status does not support -format=events")
 		}
 		return renderSessionStatus(ctx, runtime, cfg, stdout)
+	}
+	if cfg.InspectPlugin {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-inspect-plugin does not support -format=events")
+		}
+		return renderPluginInspection(cfg, stdout)
 	}
 	if cfg.ExportReplayPack {
 		if cfg.Format == outputFormatEvents {
@@ -237,6 +252,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	listProfilesValue := fs.Bool("profiles", false, "list configured auth profiles and exit")
 	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
+	inspectPluginValue := fs.Bool("inspect-plugin", false, "inspect a Claude Code plugin root and exit")
 	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
 	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
@@ -296,6 +312,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ListProfiles:        *listProfilesValue,
 		ListModels:          *listModelsValue,
 		ShowStatus:          *showStatusValue,
+		InspectPlugin:       *inspectPluginValue,
 		ExportReplayPack:    *exportReplayPackValue,
 		ValidateCandidate:   *validateCandidateValue,
 		SummarizeRuns:       *summarizeRunsValue,
@@ -654,6 +671,31 @@ func renderReplayPack(ctx context.Context, runtime engine.Engine, cfg config, st
 	}
 }
 
+func renderPluginInspection(cfg config, stdout io.Writer) error {
+	descriptor, err := plugin.Inspect(cfg.CWD)
+	if err != nil {
+		return err
+	}
+
+	result := pluginInspectionResult{
+		Engine: "cc-engine",
+		Root:   descriptor.Root,
+		Status: descriptor.StatusPayload(descriptor.Manifest.Name),
+		Issues: plugin.ValidateDescriptor(descriptor),
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderPluginInspectionText(stdout, result)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+}
+
 func renderCandidateValidation(cfg config, stdout io.Writer) error {
 	result, err := harness.ValidateCandidateRoot(cfg.CWD)
 	if err != nil {
@@ -954,6 +996,40 @@ func renderReplayPackText(stdout io.Writer, pack contracts.ReplayPack) error {
 		fmt.Sprintf("model: %s", pack.Summary.Model),
 		fmt.Sprintf("events: %d", len(pack.Events)),
 		fmt.Sprintf("terminal_outcome: %s", pack.Summary.TerminalOutcome),
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderPluginInspectionText(stdout io.Writer, result pluginInspectionResult) error {
+	lines := []string{
+		"cc-engine plugin inspection",
+		fmt.Sprintf("root: %s", result.Root),
+		fmt.Sprintf("plugin_id: %s", result.Status.PluginID),
+		fmt.Sprintf("name: %s", result.Status.Name),
+		fmt.Sprintf("version: %s", result.Status.Version),
+		fmt.Sprintf("valid: %t", result.Status.Valid),
+		fmt.Sprintf("loaded: %t", result.Status.Loaded),
+		fmt.Sprintf("hook_count: %d", result.Status.HookCount),
+		fmt.Sprintf("mcp_servers: %d", result.Status.MCPServers),
+	}
+	if len(result.Status.Commands) > 0 {
+		lines = append(lines, fmt.Sprintf("commands: %s", strings.Join(result.Status.Commands, ", ")))
+	}
+	if len(result.Status.Agents) > 0 {
+		lines = append(lines, fmt.Sprintf("agents: %s", strings.Join(result.Status.Agents, ", ")))
+	}
+	if len(result.Status.Skills) > 0 {
+		lines = append(lines, fmt.Sprintf("skills: %s", strings.Join(result.Status.Skills, ", ")))
+	}
+	if result.Status.Error != "" {
+		lines = append(lines, fmt.Sprintf("error: %s", result.Status.Error))
+	}
+	if len(result.Issues) > 0 {
+		lines = append(lines, "validation_issues:")
+		for _, issue := range result.Issues {
+			lines = append(lines, fmt.Sprintf("  - %s: %s", issue.Field, issue.Message))
+		}
 	}
 	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
 	return err
