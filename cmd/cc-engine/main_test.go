@@ -267,6 +267,45 @@ func TestRunInspectPluginJSON(t *testing.T) {
 	}
 }
 
+func TestRunInspectMarketplaceJSON(t *testing.T) {
+	root := createMarketplaceRoot(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-format=json",
+		"-inspect-marketplace",
+		"-cwd=" + root,
+		"-state-root=" + filepath.Join(t.TempDir(), "state-root"),
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("inspect marketplace run returned error: %v", err)
+	}
+
+	var got marketplaceInspectionResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("failed to parse inspect marketplace json output: %v", err)
+	}
+	if got.Engine != "cc-engine" {
+		t.Fatalf("expected engine cc-engine, got %q", got.Engine)
+	}
+	if got.Root != root {
+		t.Fatalf("expected root %q, got %q", root, got.Root)
+	}
+	if got.Status.Name != "claude-code-plugins" || got.Status.Version != "1.0.0" {
+		t.Fatalf("expected marketplace identity in status, got %#v", got.Status)
+	}
+	if !got.Status.Valid || got.Status.PluginCount != 2 {
+		t.Fatalf("expected valid marketplace status with 2 plugins, got %#v", got.Status)
+	}
+	if len(got.Manifest.Plugins) != 2 {
+		t.Fatalf("expected 2 plugin manifest entries, got %#v", got.Manifest.Plugins)
+	}
+	if len(got.Issues) != 0 {
+		t.Fatalf("expected no validation issues, got %#v", got.Issues)
+	}
+}
+
 func TestRunExportReplayPackJSON(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 	var stdout bytes.Buffer
@@ -1006,6 +1045,28 @@ func createPluginRoot(t *testing.T) string {
 		}
 	}
 
+	return root
+}
+
+func createMarketplaceRoot(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	manifestDir := filepath.Join(root, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	for _, relativeDir := range []string{
+		filepath.Join("plugins", "agent-sdk-dev"),
+		filepath.Join("plugins", "code-review"),
+	} {
+		if err := os.MkdirAll(filepath.Join(root, relativeDir), 0o755); err != nil {
+			t.Fatalf("MkdirAll returned error for %s: %v", relativeDir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "marketplace.json"), []byte(`{"name":"claude-code-plugins","version":"1.0.0","description":"Bundled plugins for Claude Code","owner":{"name":"Anthropic","email":"support@anthropic.com"},"plugins":[{"name":"agent-sdk-dev","description":"Development kit for Agent SDK work","source":"./plugins/agent-sdk-dev","category":"development"},{"name":"code-review","description":"Automated PR review toolkit","version":"1.0.0","author":{"name":"Anthropic","email":"support@anthropic.com"},"source":"./plugins/code-review","category":"productivity"}]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for marketplace manifest: %v", err)
+	}
 	return root
 }
 

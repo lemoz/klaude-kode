@@ -12,6 +12,48 @@ that surface yet.
 - `divergent`
 - `not_started`
 
+## 2026-04-09
+
+### Marketplace Manifest Inspection Surface
+
+Reviewed upstream sources:
+
+- [upstream README](https://raw.githubusercontent.com/anthropics/claude-code/main/README.md)
+- [upstream CHANGELOG](https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md)
+- [upstream plugins README](https://raw.githubusercontent.com/anthropics/claude-code/main/plugins/README.md)
+- [upstream marketplace manifest](https://raw.githubusercontent.com/anthropics/claude-code/main/.claude-plugin/marketplace.json)
+- [Issue #9641: plugin manager misses installed plugins despite valid on-disk layout](https://github.com/anthropics/claude-code/issues/9641)
+- [Issue #10364: marketplace installs skills to the wrong directory](https://github.com/anthropics/claude-code/issues/10364)
+
+Key findings:
+
+- The bundled upstream `.claude-plugin/marketplace.json` is now a public,
+  versioned product surface with owner metadata plus per-plugin `source` and
+  `category` fields.
+- Recent upstream changelog entries include marketplace-facing fixes such as
+  `claude plugin update` incorrectly reporting local-marketplace plugins as
+  current when remote commits existed, which implies marketplace metadata is
+  part of normal user workflows rather than hidden packaging state.
+- Current upstream plugin issues still show discovery/install problems when
+  marketplace metadata and local filesystem state diverge, so the new runtime
+  needs a typed Go-owned marketplace contract before later `/plugin`
+  browse/install work.
+
+Local change:
+
+- Klaude Kode now has a typed Go parser, validator, and inspector for
+  `.claude-plugin/marketplace.json`, including owner metadata, per-plugin
+  source/category fields, duplicate-name checks, and source-path validation.
+- `cc-engine -inspect-marketplace` and `cc -inspect-marketplace` now expose the
+  canonical marketplace inspection surface with validation issues and
+  marketplace summary output.
+
+Local status: `partial`.
+
+- Marketplace manifest metadata is now a concrete Go-owned parity surface.
+- Marketplace-driven plugin loading, install/update flows, and engine-emitted
+  inventory events are still not started.
+
 ## 2026-04-02
 
 ### Roadmap Recalibration

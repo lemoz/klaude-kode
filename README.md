@@ -81,6 +81,8 @@ blueprint-only state. The current implementation supports:
     layouts before loader work begins
   - engine-owned plugin inspection via `cc-engine -inspect-plugin` and
     `cc -inspect-plugin`
+  - engine-owned marketplace manifest inspection via
+    `cc-engine -inspect-marketplace` and `cc -inspect-marketplace`
 - live provider-backed CLI and shell turns
 - replay-pack export
 - candidate validation
@@ -162,6 +164,13 @@ Inspect a plugin root:
 ```bash
 go run ./cmd/cc-engine -inspect-plugin -cwd=/path/to/plugin
 go run ./cmd/cc -inspect-plugin -cwd=/path/to/plugin
+```
+
+Inspect a plugin marketplace root:
+
+```bash
+go run ./cmd/cc-engine -inspect-marketplace -cwd=/path/to/repo
+go run ./cmd/cc -inspect-marketplace -cwd=/path/to/repo
 ```
 
 Run replay and benchmark evals:

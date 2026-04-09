@@ -1,5 +1,23 @@
 # Automation Handoff
 
+## 2026-04-09
+
+- Completed unit: Phase 4 engine-owned marketplace manifest inspection and validation for `cc` and `cc-engine`.
+- Why chosen: after plugin root inspection, the next smallest safe parity step was upstream marketplace metadata, because Claude Code now ships a public bundled marketplace manifest and recent plugin update/discovery fixes show that marketplace state is user-visible rather than shell-only bookkeeping.
+- Files changed: `README.md`, `cmd/cc-engine/main.go`, `cmd/cc-engine/main_test.go`, `cmd/cc/main.go`, `cmd/cc/main_test.go`, `docs/04-compatibility-matrix.md`, `docs/05-roadmap.md`, `docs/09-automation-handoff.md`, `docs/10-upstream-parity-log.md`, `internal/plugin/marketplace.go`, `internal/plugin/marketplace_test.go`.
+- Verification run:
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go test ./internal/plugin ./cmd/cc ./cmd/cc-engine`
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth` and `internal/engine` because this sandbox denies binding `[::1]:0`.
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go run ./cmd/cc-engine -format=json -inspect-marketplace -cwd="$tmpdir"` against a temporary repo root with `.claude-plugin/marketplace.json` and plugin source directories.
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go run ./cmd/cc -inspect-marketplace -cwd="$tmpdir"` against the same temporary repo root.
+- Commit hash: not created; sandbox denied writes to `/Users/cdossman/klaude-kode/.git/worktrees/klaude-kode7/index.lock` during `git add`/`git commit`.
+- Push status: not pushed; sandbox DNS/network restrictions could not resolve `github.com`.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this marketplace manifest change, and this environment also blocks git lockfile writes and outbound push resolution.
+- Next 3 recommended atomic units:
+  - Add engine-emitted plugin inventory events so shell `/plugin` flows can consume plugin and marketplace state without direct filesystem inspection.
+  - Start typed hook manifest loading so plugin hook inventory becomes structured metadata instead of count-only discovery.
+  - Use marketplace source metadata to drive local plugin loading/inventory across bundled plugin roots before install/update flows.
+
 ## 2026-04-07
 
 - Completed unit: Phase 4 engine-owned plugin inspection and canonical status rendering for `cc` and `cc-engine`.

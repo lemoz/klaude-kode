@@ -35,6 +35,7 @@ type config struct {
 	ListModels          bool
 	ShowStatus          bool
 	InspectPlugin       bool
+	InspectMarketplace  bool
 	ExportReplayPack    bool
 	ValidateCandidate   bool
 	RunReplayEval       bool
@@ -104,6 +105,14 @@ type pluginInspectionResult struct {
 	Issues []plugin.ValidationIssue      `json:"validation_issues,omitempty"`
 }
 
+type marketplaceInspectionResult struct {
+	Engine   string                     `json:"engine"`
+	Root     string                     `json:"root"`
+	Status   plugin.MarketplaceStatus   `json:"status"`
+	Manifest plugin.MarketplaceManifest `json:"manifest"`
+	Issues   []plugin.ValidationIssue   `json:"validation_issues,omitempty"`
+}
+
 var performAnthropicOAuthLogin = anthropicoauth.PerformLogin
 
 func main() {
@@ -153,6 +162,12 @@ func runWithInput(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wr
 			return fmt.Errorf("-inspect-plugin does not support -format=events")
 		}
 		return renderPluginInspection(cfg, stdout)
+	}
+	if cfg.InspectMarketplace {
+		if cfg.Format == outputFormatEvents {
+			return fmt.Errorf("-inspect-marketplace does not support -format=events")
+		}
+		return renderMarketplaceInspection(cfg, stdout)
 	}
 	if cfg.ExportReplayPack {
 		if cfg.Format == outputFormatEvents {
@@ -253,6 +268,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 	listModelsValue := fs.Bool("models", false, "list available models for the selected or default profile and exit")
 	showStatusValue := fs.Bool("status", false, "show summary for an existing session and exit")
 	inspectPluginValue := fs.Bool("inspect-plugin", false, "inspect a Claude Code plugin root and exit")
+	inspectMarketplaceValue := fs.Bool("inspect-marketplace", false, "inspect a Claude Code plugin marketplace manifest and exit")
 	exportReplayPackValue := fs.Bool("export-replay-pack", false, "export a replay pack for an existing session and exit")
 	validateCandidateValue := fs.Bool("validate-candidate", false, "validate a candidate root and exit")
 	summarizeRunsValue := fs.Bool("summarize-runs", false, "summarize persisted replay evaluation runs and exit")
@@ -313,6 +329,7 @@ func parseArgs(args []string, stderr io.Writer) (config, error) {
 		ListModels:          *listModelsValue,
 		ShowStatus:          *showStatusValue,
 		InspectPlugin:       *inspectPluginValue,
+		InspectMarketplace:  *inspectMarketplaceValue,
 		ExportReplayPack:    *exportReplayPackValue,
 		ValidateCandidate:   *validateCandidateValue,
 		SummarizeRuns:       *summarizeRunsValue,
@@ -696,6 +713,32 @@ func renderPluginInspection(cfg config, stdout io.Writer) error {
 	}
 }
 
+func renderMarketplaceInspection(cfg config, stdout io.Writer) error {
+	descriptor, err := plugin.InspectMarketplace(cfg.CWD)
+	if err != nil {
+		return err
+	}
+
+	result := marketplaceInspectionResult{
+		Engine:   "cc-engine",
+		Root:     descriptor.Root,
+		Status:   descriptor.Status(),
+		Manifest: descriptor.Manifest,
+		Issues:   plugin.ValidateMarketplaceDescriptor(descriptor),
+	}
+
+	switch cfg.Format {
+	case outputFormatText:
+		return renderMarketplaceInspectionText(stdout, result)
+	case outputFormatJSON:
+		fallthrough
+	default:
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+}
+
 func renderCandidateValidation(cfg config, stdout io.Writer) error {
 	result, err := harness.ValidateCandidateRoot(cfg.CWD)
 	if err != nil {
@@ -1021,6 +1064,38 @@ func renderPluginInspectionText(stdout io.Writer, result pluginInspectionResult)
 	}
 	if len(result.Status.Skills) > 0 {
 		lines = append(lines, fmt.Sprintf("skills: %s", strings.Join(result.Status.Skills, ", ")))
+	}
+	if result.Status.Error != "" {
+		lines = append(lines, fmt.Sprintf("error: %s", result.Status.Error))
+	}
+	if len(result.Issues) > 0 {
+		lines = append(lines, "validation_issues:")
+		for _, issue := range result.Issues {
+			lines = append(lines, fmt.Sprintf("  - %s: %s", issue.Field, issue.Message))
+		}
+	}
+	_, err := fmt.Fprintln(stdout, strings.Join(lines, "\n"))
+	return err
+}
+
+func renderMarketplaceInspectionText(stdout io.Writer, result marketplaceInspectionResult) error {
+	lines := []string{
+		"cc-engine marketplace inspection",
+		fmt.Sprintf("root: %s", result.Root),
+		fmt.Sprintf("name: %s", result.Status.Name),
+		fmt.Sprintf("version: %s", result.Status.Version),
+		fmt.Sprintf("valid: %t", result.Status.Valid),
+		fmt.Sprintf("plugin_count: %d", result.Status.PluginCount),
+	}
+	if len(result.Status.Categories) > 0 {
+		lines = append(lines, fmt.Sprintf("categories: %s", strings.Join(result.Status.Categories, ", ")))
+	}
+	if len(result.Manifest.Plugins) > 0 {
+		pluginNames := make([]string, 0, len(result.Manifest.Plugins))
+		for _, entry := range result.Manifest.Plugins {
+			pluginNames = append(pluginNames, entry.Name)
+		}
+		lines = append(lines, fmt.Sprintf("plugins: %s", strings.Join(pluginNames, ", ")))
 	}
 	if result.Status.Error != "" {
 		lines = append(lines, fmt.Sprintf("error: %s", result.Status.Error))

@@ -245,6 +245,35 @@ func TestRunInspectPluginText(t *testing.T) {
 	}
 }
 
+func TestRunInspectMarketplaceText(t *testing.T) {
+	root := createMarketplaceRoot(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run([]string{
+		"-inspect-marketplace",
+		"-cwd=" + root,
+		"-state-root=" + filepath.Join(t.TempDir(), "state-root"),
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("inspect marketplace run returned error: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cc marketplace inspection") {
+		t.Fatalf("expected marketplace inspection header, got %q", output)
+	}
+	if !strings.Contains(output, "plugin_count: 2") {
+		t.Fatalf("expected plugin count in output, got %q", output)
+	}
+	if !strings.Contains(output, "categories: development, productivity") {
+		t.Fatalf("expected categories in output, got %q", output)
+	}
+	if !strings.Contains(output, "plugins: agent-sdk-dev, code-review") {
+		t.Fatalf("expected plugin names in output, got %q", output)
+	}
+}
+
 func TestRunExportReplayPackText(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state-root")
 	var stdout bytes.Buffer
@@ -767,6 +796,28 @@ func createPluginRoot(t *testing.T) string {
 		}
 	}
 
+	return root
+}
+
+func createMarketplaceRoot(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	manifestDir := filepath.Join(root, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	for _, relativeDir := range []string{
+		filepath.Join("plugins", "agent-sdk-dev"),
+		filepath.Join("plugins", "code-review"),
+	} {
+		if err := os.MkdirAll(filepath.Join(root, relativeDir), 0o755); err != nil {
+			t.Fatalf("MkdirAll returned error for %s: %v", relativeDir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "marketplace.json"), []byte(`{"name":"claude-code-plugins","version":"1.0.0","description":"Bundled plugins for Claude Code","owner":{"name":"Anthropic","email":"support@anthropic.com"},"plugins":[{"name":"agent-sdk-dev","description":"Development kit for Agent SDK work","source":"./plugins/agent-sdk-dev","category":"development"},{"name":"code-review","description":"Automated PR review toolkit","version":"1.0.0","author":{"name":"Anthropic","email":"support@anthropic.com"},"source":"./plugins/code-review","category":"productivity"}]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for marketplace manifest: %v", err)
+	}
 	return root
 }
 

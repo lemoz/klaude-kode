@@ -36,7 +36,7 @@ UI/UX parity policy:
 | Remote/assistant/direct-connect/SSH | `src/main.tsx`, `src/remote/*` | preserve | Same user concepts, unified transport model |
 | Slash commands | `src/commands.ts` | preserve | Major user-facing commands remain |
 | Help and discoverability | `src/commands/help`, command/status surfaces | preserve | Common workflows must stay learnable without reading source or hidden docs |
-| Hooks/skills/plugins | `src/commands/hooks`, `src/skills`, `src/plugins` | preserve | Same top-level concepts with cleaner manifest/runtime split |
+| Hooks/skills/plugins | `src/commands/hooks`, `src/skills`, `src/plugins` | preserve | Same top-level concepts with cleaner manifest/runtime split, including typed marketplace metadata owned by Go |
 | Config precedence and managed policy | `src/utils/managedEnv.ts`, `src/services/policyLimits` | preserve | Same user expectations, simpler implementation |
 | Telemetry, retries, compaction, budgets | `src/query.ts`, `src/services/api/*`, `src/services/analytics/*` | preserve | Same behaviorally visible outcomes, moved behind engine services |
 
