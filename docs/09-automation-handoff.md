@@ -10,9 +10,9 @@
   - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth`, `internal/engine`, and `internal/provider` because this sandbox denies binding `[::1]:0`.
   - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go run ./cmd/cc-engine -inspect-plugin -cwd="$tmpdir"` against a temporary plugin root with `commands/`, `agents/`, `skills/`, `.mcp.json`, and typed `hooks/hooks.json`.
   - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go run ./cmd/cc -inspect-plugin -cwd="$tmpdir"` against the same temporary plugin root.
-- Commit hash: not created; sandbox denied writes to `/Users/cdossman/klaude-kode/.git/worktrees/klaude-kode11/index.lock` during `git add` and `git commit`.
-- Push status: not pushed; outbound git resolution failed with `Could not resolve host: github.com`.
-- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this hook inspection change, and this environment still blocks worktree index locks plus outbound GitHub access.
+- Commit hash: `e7001af2610cab433d67375e20985667dd9b2098` (`phase4: inspect typed plugin hook manifests`).
+- Push status: pushed successfully to `origin/main`.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this hook inspection change.
 - Next 3 recommended atomic units:
   - Feed typed hook manifest data into an engine-owned plugin inventory event so shell/plugin UIs stop reparsing plugin roots.
   - Start plugin loader integration that resolves standard `hooks/hooks.json` and avoids duplicate registration paths.
