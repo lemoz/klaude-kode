@@ -81,6 +81,8 @@ blueprint-only state. The current implementation supports:
     layouts before loader work begins
   - engine-owned plugin inspection via `cc-engine -inspect-plugin` and
     `cc -inspect-plugin`
+  - typed `hooks/hooks.json` loading and hook-event projection in plugin
+    inspection surfaces
   - engine-owned marketplace manifest inspection via
     `cc-engine -inspect-marketplace` and `cc -inspect-marketplace`
 - live provider-backed CLI and shell turns

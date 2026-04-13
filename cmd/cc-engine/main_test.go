@@ -259,6 +259,9 @@ func TestRunInspectPluginJSON(t *testing.T) {
 	if !got.Status.Valid || !got.Status.Loaded {
 		t.Fatalf("expected valid loaded plugin status, got %#v", got.Status)
 	}
+	if len(got.Status.HookEvents) != 2 || got.Status.HookEvents[0] != "PostToolUse" || got.Status.HookEvents[1] != "SessionStart" {
+		t.Fatalf("expected hook events in output, got %#v", got.Status)
+	}
 	if got.Status.HookCount != 2 || got.Status.MCPServers != 1 {
 		t.Fatalf("expected hooks and mcp projection, got %#v", got.Status)
 	}
@@ -1032,8 +1035,6 @@ func createPluginRoot(t *testing.T) string {
 		filepath.Join("commands", "review.md"),
 		filepath.Join("agents", "frontend.md"),
 		filepath.Join("skills", "deploy", "SKILL.md"),
-		filepath.Join("hooks", "session-start.sh"),
-		filepath.Join("hooks", "post-tool", "notify.py"),
 		".mcp.json",
 	} {
 		fullPath := filepath.Join(root, relativePath)
@@ -1043,6 +1044,12 @@ func createPluginRoot(t *testing.T) string {
 		if err := os.WriteFile(fullPath, []byte("content"), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error for %s: %v", relativePath, err)
 		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error for hooks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "hooks", "hooks.json"), []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"./hooks-handlers/session-start.sh"}]}],"PostToolUse":[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"python3 ${CLAUDE_PLUGIN_ROOT}/hooks/notify.py"}]}]}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for hooks.json: %v", err)
 	}
 
 	return root

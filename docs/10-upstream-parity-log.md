@@ -12,6 +12,51 @@ that surface yet.
 - `divergent`
 - `not_started`
 
+## 2026-04-13
+
+### Typed Plugin Hook Manifest Inspection
+
+Reviewed upstream sources:
+
+- [upstream README](https://github.com/anthropics/claude-code/blob/main/README.md)
+- [upstream CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)
+- [upstream plugins README](https://github.com/anthropics/claude-code/blob/main/plugins/README.md)
+- [upstream marketplace manifest](https://github.com/anthropics/claude-code/blob/main/.claude-plugin/marketplace.json)
+- [upstream `security-guidance` hooks manifest](https://github.com/anthropics/claude-code/blob/main/plugins/security-guidance/hooks/hooks.json)
+- [upstream `explanatory-output-style` hooks manifest](https://github.com/anthropics/claude-code/blob/main/plugins/explanatory-output-style/hooks/hooks.json)
+- [Issue #10225: plugin `UserPromptSubmit` hooks register but never execute](https://github.com/anthropics/claude-code/issues/10225)
+- [Issue #10871: plugin-registered hooks execute twice](https://github.com/anthropics/claude-code/issues/10871)
+- [Issue #41943: `/reload-plugins` crashes when marketplace plugins use `hooks/hooks.json`](https://github.com/anthropics/claude-code/issues/41943)
+- [PR #12756: manifest-driven plugin loading and missing hook declarations](https://github.com/anthropics/claude-code/pull/12756)
+
+Key findings:
+
+- The live upstream plugin surface treats `hooks/hooks.json` as a typed,
+  user-visible contract rather than an opaque folder of scripts.
+- Recent upstream fixes and bug reports show that correct hook file loading,
+  event recognition, deduplication, and path handling are part of normal
+  plugin behavior, not internal implementation details.
+- The public bundled plugins use a small, stable hook-manifest shape with a
+  top-level `hooks` object keyed by event names and matcher entries containing
+  command hooks.
+
+Local change:
+
+- Klaude Kode plugin inspection now loads and validates the standard
+  `hooks/hooks.json` file instead of only counting files under `hooks/`.
+- `plugin_status` payloads and `cc`/`cc-engine` inspection output now project
+  typed hook metadata through `hook_count` plus `hook_events`.
+- Validation now reports malformed hook manifests, unsupported event names,
+  missing commands, and missing `hooks/hooks.json` when a `hooks/` directory is
+  present.
+
+Local status: `partial`.
+
+- Typed hook manifest inspection is now matched closely enough for plugin-state
+  projection and validation.
+- Hook execution wiring, plugin loader integration, deduplication safeguards,
+  and marketplace/plugin runtime loading are still not started.
+
 ## 2026-04-09
 
 ### Marketplace Manifest Inspection Surface

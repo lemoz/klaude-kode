@@ -261,6 +261,7 @@ type PluginStatusPayload struct {
 	Agents     []string `json:"agents"`
 	Skills     []string `json:"skills"`
 	HookCount  int      `json:"hook_count"`
+	HookEvents []string `json:"hook_events,omitempty"`
 	MCPServers int      `json:"mcp_servers"`
 }
 

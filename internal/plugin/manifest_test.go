@@ -113,8 +113,6 @@ func TestInspectDiscoversPluginContributions(t *testing.T) {
 		filepath.Join("agents", "frontend.md"),
 		filepath.Join("skills", "deploy", "SKILL.md"),
 		filepath.Join("skills", "ops", "incident", "SKILL.md"),
-		filepath.Join("hooks", "session-start.sh"),
-		filepath.Join("hooks", "post-tool", "notify.py"),
 		".mcp.json",
 	} {
 		fullPath := filepath.Join(root, relativePath)
@@ -153,8 +151,24 @@ func TestInspectDiscoversPluginContributions(t *testing.T) {
 		t.Fatalf("expected descriptor to report README.md")
 	}
 
+	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error for hooks: %v", err)
+	}
+	hooksConfig := []byte(`{"description":"Example plugin hooks","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"./hooks-handlers/session-start.sh"}]}],"PostToolUse":[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"python3 ${CLAUDE_PLUGIN_ROOT}/hooks/notify.py","timeout":5}]}]}}`)
+	if err := os.WriteFile(filepath.Join(root, "hooks", "hooks.json"), hooksConfig, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for hooks.json: %v", err)
+	}
+
+	descriptor, err = Inspect(root)
+	if err != nil {
+		t.Fatalf("Inspect returned error after hooks config: %v", err)
+	}
+
 	if descriptor.HookCount != 2 {
-		t.Fatalf("expected descriptor to report 2 hook files, got %#v", descriptor)
+		t.Fatalf("expected descriptor to report 2 configured hooks, got %#v", descriptor)
+	}
+	if len(descriptor.HookEvents) != 2 || descriptor.HookEvents[0] != "PostToolUse" || descriptor.HookEvents[1] != "SessionStart" {
+		t.Fatalf("expected descriptor to project hook events, got %#v", descriptor.HookEvents)
 	}
 
 	if !descriptor.HasMCPConfig {
@@ -168,7 +182,7 @@ func TestInspectDiscoversPluginContributions(t *testing.T) {
 	if status.PluginID != "example-plugin" || status.Version != "1.2.3" {
 		t.Fatalf("expected plugin identity in status, got %#v", status)
 	}
-	if len(status.Skills) != 2 || status.MCPServers != 1 || status.HookCount != 2 {
+	if len(status.Skills) != 2 || status.MCPServers != 1 || status.HookCount != 2 || len(status.HookEvents) != 2 {
 		t.Fatalf("expected skills, hooks, and mcp projection in status, got %#v", status)
 	}
 }

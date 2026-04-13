@@ -1,5 +1,23 @@
 # Automation Handoff
 
+## 2026-04-13
+
+- Completed unit: Phase 4 typed `hooks/hooks.json` loading and hook-event projection for `cc` and `cc-engine` plugin inspection.
+- Why chosen: after plugin root and marketplace inspection, the next smallest safe Phase 4 step was replacing count-only hook discovery with the typed upstream hook manifest contract so future plugin and `/plugin` flows can stay Go-owned instead of inferring hook state from arbitrary files.
+- Files changed: `README.md`, `cmd/cc-engine/main.go`, `cmd/cc-engine/main_test.go`, `cmd/cc/main.go`, `cmd/cc/main_test.go`, `docs/05-roadmap.md`, `docs/09-automation-handoff.md`, `docs/10-upstream-parity-log.md`, `internal/contracts/types.go`, `internal/contracts/types_test.go`, `internal/plugin/hooks.go`, `internal/plugin/hooks_test.go`, `internal/plugin/manifest.go`, `internal/plugin/manifest_test.go`.
+- Verification run:
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go test ./internal/plugin ./internal/contracts ./cmd/cc ./cmd/cc-engine`
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go test ./...` failed only in existing loopback-dependent `httptest.NewServer` cases under `internal/auth/anthropicoauth`, `internal/engine`, and `internal/provider` because this sandbox denies binding `[::1]:0`.
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go run ./cmd/cc-engine -inspect-plugin -cwd="$tmpdir"` against a temporary plugin root with `commands/`, `agents/`, `skills/`, `.mcp.json`, and typed `hooks/hooks.json`.
+  - `GOCACHE=$(pwd)/.tmp/gocache GOMODCACHE=$(pwd)/.tmp/gomodcache go run ./cmd/cc -inspect-plugin -cwd="$tmpdir"` against the same temporary plugin root.
+- Commit hash: not created; sandbox denied writes to `/Users/cdossman/klaude-kode/.git/worktrees/klaude-kode11/index.lock` during `git add` and `git commit`.
+- Push status: not pushed; outbound git resolution failed with `Could not resolve host: github.com`.
+- Blockers: full-suite verification remains partially blocked by sandboxed loopback listener restrictions unrelated to this hook inspection change, and this environment still blocks worktree index locks plus outbound GitHub access.
+- Next 3 recommended atomic units:
+  - Feed typed hook manifest data into an engine-owned plugin inventory event so shell/plugin UIs stop reparsing plugin roots.
+  - Start plugin loader integration that resolves standard `hooks/hooks.json` and avoids duplicate registration paths.
+  - Begin Go-owned MCP status and lifecycle projection so plugin and MCP state can converge in one runtime surface.
+
 ## 2026-04-09
 
 - Completed unit: Phase 4 engine-owned marketplace manifest inspection and validation for `cc` and `cc-engine`.

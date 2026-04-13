@@ -49,6 +49,7 @@ type Descriptor struct {
 	Commands         []string          `json:"commands,omitempty"`
 	Agents           []string          `json:"agents,omitempty"`
 	Skills           []string          `json:"skills,omitempty"`
+	HookEvents       []string          `json:"hook_events,omitempty"`
 	HookCount        int               `json:"hook_count"`
 	HasREADME        bool              `json:"has_readme"`
 	HasMCPConfig     bool              `json:"has_mcp_config"`
@@ -107,7 +108,7 @@ func Inspect(root string) (Descriptor, error) {
 		return Descriptor{}, fmt.Errorf("check readme: %w", err)
 	}
 
-	hookCount, hookIssues, err := countHookFiles(filepath.Join(root, hooksDirName))
+	hookStatus, hookIssues, err := InspectHookManifest(root)
 	if err != nil {
 		return Descriptor{}, fmt.Errorf("inspect hooks: %w", err)
 	}
@@ -131,7 +132,8 @@ func Inspect(root string) (Descriptor, error) {
 		Commands:         commands,
 		Agents:           agents,
 		Skills:           skills,
-		HookCount:        hookCount,
+		HookEvents:       hookStatus.Events,
+		HookCount:        hookStatus.CommandCount,
 		HasREADME:        hasReadme,
 		HasMCPConfig:     hasMCPConfig,
 		ValidationIssues: issues,
@@ -149,6 +151,7 @@ func (d Descriptor) StatusPayload(pluginID string) contracts.PluginStatusPayload
 		Commands:   append([]string(nil), d.Commands...),
 		Agents:     append([]string(nil), d.Agents...),
 		Skills:     append([]string(nil), d.Skills...),
+		HookEvents: append([]string(nil), d.HookEvents...),
 		HookCount:  d.HookCount,
 		MCPServers: 0,
 	}
@@ -313,44 +316,6 @@ func listSkills(root string) ([]string, []ValidationIssue, error) {
 
 	sort.Strings(skills)
 	return skills, nil, nil
-}
-
-func countHookFiles(dir string) (int, []ValidationIssue, error) {
-	info, err := os.Stat(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil, nil
-		}
-		if isNotDir(err) {
-			return 0, []ValidationIssue{{
-				Field:   hooksDirName,
-				Message: "hooks must be a directory",
-			}}, nil
-		}
-		return 0, nil, err
-	}
-	if !info.IsDir() {
-		return 0, []ValidationIssue{{
-			Field:   hooksDirName,
-			Message: "hooks must be a directory",
-		}}, nil
-	}
-
-	count := 0
-	err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		count++
-		return nil
-	})
-	if err != nil {
-		return 0, nil, err
-	}
-	return count, nil, nil
 }
 
 func inspectRequiredFile(path string, field string, required bool) (bool, []ValidationIssue, error) {

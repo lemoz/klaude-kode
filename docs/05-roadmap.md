@@ -313,6 +313,8 @@ Do not require:
     contribution layouts
   - engine-owned plugin inspection and canonical status rendering in `cc` and
     `cc-engine`
+  - typed `hooks/hooks.json` loading and hook-event projection in `cc` and
+    `cc-engine` plugin inspection output
   - engine-owned marketplace manifest inspection and validation in `cc` and
     `cc-engine`
 

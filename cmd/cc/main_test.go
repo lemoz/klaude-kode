@@ -240,6 +240,9 @@ func TestRunInspectPluginText(t *testing.T) {
 	if !strings.Contains(output, "hook_count: 2") {
 		t.Fatalf("expected hook count in output, got %q", output)
 	}
+	if !strings.Contains(output, "hook_events: PostToolUse, SessionStart") {
+		t.Fatalf("expected hook events in output, got %q", output)
+	}
 	if !strings.Contains(output, "skills: deploy") {
 		t.Fatalf("expected skills in output, got %q", output)
 	}
@@ -783,8 +786,6 @@ func createPluginRoot(t *testing.T) string {
 		filepath.Join("commands", "review.md"),
 		filepath.Join("agents", "frontend.md"),
 		filepath.Join("skills", "deploy", "SKILL.md"),
-		filepath.Join("hooks", "session-start.sh"),
-		filepath.Join("hooks", "post-tool", "notify.py"),
 		".mcp.json",
 	} {
 		fullPath := filepath.Join(root, relativePath)
@@ -794,6 +795,12 @@ func createPluginRoot(t *testing.T) string {
 		if err := os.WriteFile(fullPath, []byte("content"), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error for %s: %v", relativePath, err)
 		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error for hooks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "hooks", "hooks.json"), []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"./hooks-handlers/session-start.sh"}]}],"PostToolUse":[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"python3 ${CLAUDE_PLUGIN_ROOT}/hooks/notify.py"}]}]}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error for hooks.json: %v", err)
 	}
 
 	return root

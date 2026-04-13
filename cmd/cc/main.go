@@ -852,6 +852,9 @@ func renderPluginInspectionText(stdout io.Writer, result pluginInspectionResult)
 	if len(result.Status.Skills) > 0 {
 		lines = append(lines, fmt.Sprintf("skills: %s", strings.Join(result.Status.Skills, ", ")))
 	}
+	if len(result.Status.HookEvents) > 0 {
+		lines = append(lines, fmt.Sprintf("hook_events: %s", strings.Join(result.Status.HookEvents, ", ")))
+	}
 	if result.Status.Error != "" {
 		lines = append(lines, fmt.Sprintf("error: %s", result.Status.Error))
 	}
